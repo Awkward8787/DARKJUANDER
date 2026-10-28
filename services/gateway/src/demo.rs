@@ -35,8 +35,9 @@ fn run_in(dir: &Path) -> Result<String, String> {
     fs::write(dir.join("policy.yaml"), DEFAULT_POLICY).map_err(|err| err.to_string())?;
     write_idle_psi(&dir.join("memory"))?;
     write_idle_psi(&dir.join("io"))?;
+    let signer = dj_audit::spawn_test_signer().map_err(|err| err.to_string())?;
     let socket = dir.join("dj.sock");
-    let cfg = demo_config(dir, &socket, &private_dir);
+    let cfg = demo_config(dir, &socket, &private_dir, &signer.paths);
     let yaml = serde_yaml::to_string(&cfg).map_err(|err| err.to_string())?;
     let cfg_path = dir.join("umbrad.yaml");
     fs::write(&cfg_path, yaml).map_err(|err| err.to_string())?;
@@ -61,12 +62,18 @@ fn run_in(dir: &Path) -> Result<String, String> {
     let mut report = String::from("DARKJUANDER demo scenes (mock engine)\n\n");
     scene_shared_model(&socket, &mut report)?;
     scene_cache_partition(&socket, &mut report)?;
-    scene_injection(&socket, &audit_path, &mut report)?;
+    scene_injection(
+        &socket,
+        &audit_path,
+        &signer.paths.verifying_key,
+        &mut report,
+    )?;
     scene_pressure(&socket, &mut report)?;
     scene_private(&socket, &private_dir, &audit_path, &mut report)?;
     scene_alias_grant(&socket, &mut report)?;
 
-    let verified = dj_audit::verify_file(&audit_path).map_err(|err| err.to_string())?;
+    let verified = dj_audit::verify_file(&audit_path, &signer.paths.verifying_key)
+        .map_err(|err| err.to_string())?;
     let line = format!(
         "audit verify: ok ({} entries, head {})\n",
         verified.entries,
@@ -172,7 +179,12 @@ fn scene_cache_partition(socket: &Path, report: &mut String) -> Result<(), Strin
     Ok(())
 }
 
-fn scene_injection(socket: &Path, audit_path: &Path, report: &mut String) -> Result<(), String> {
+fn scene_injection(
+    socket: &Path,
+    audit_path: &Path,
+    verifying_key: &Path,
+    report: &mut String,
+) -> Result<(), String> {
     report.push_str("scene 3: prompt-injection email is blocked and logged\n");
     let completion = chat(
         socket,
@@ -220,7 +232,8 @@ fn scene_injection(socket: &Path, audit_path: &Path, report: &mut String) -> Res
     {
         return Err(format!("email.send was not blocked: {decision}"));
     }
-    let records = dj_audit::read_records(audit_path).map_err(|err| err.to_string())?;
+    let records =
+        dj_audit::read_records(audit_path, verifying_key).map_err(|err| err.to_string())?;
     let kinds: Vec<&str> = records.iter().map(|record| record.kind.as_str()).collect();
     for kind in ["content_ingest", "model_call", "approval_prompt", "denial"] {
         if !kinds.contains(&kind) {
@@ -307,8 +320,9 @@ fn scene_private(
     if rendered.contains(CANARY) {
         return Err("files.read response contained the private bytes".into());
     }
-    if read["span_id"].as_str().is_none() {
-        return Err("files.read did not return a span handle".into());
+    let span = read["span_id"].as_str().unwrap_or("");
+    if !span.starts_with("span-") || span.len() != "span-".len() + 32 {
+        return Err(format!("span id is not a 128-bit handle: {span}"));
     }
     // The agent ignores the span and resubmits the bytes with a public label.
     let completion = chat(
@@ -400,11 +414,18 @@ fn cloud_calls(top: &Value) -> Result<u64, String> {
         .ok_or_else(|| "mock-cloud missing".into())
 }
 
-fn demo_config(dir: &Path, socket: &Path, private_dir: &Path) -> FileConfig {
+fn demo_config(
+    dir: &Path,
+    socket: &Path,
+    private_dir: &Path,
+    audit: &dj_audit::AuditPaths,
+) -> FileConfig {
     let text = format!(
         r#"
 socket: {socket}
-audit_path: {audit}
+audit_path: {audit_log}
+audit_signer_socket: {signer}
+audit_verifying_key: {verifying}
 policy_path: {policy}
 local_only: false
 prefer_cloud: true
@@ -485,7 +506,9 @@ principals:
       - "admin.control"
 "#,
         socket = socket.display(),
-        audit = dir.join("audit.log").display(),
+        audit_log = dir.join("audit.log").display(),
+        signer = audit.signer_socket.display(),
+        verifying = audit.verifying_key.display(),
         policy = dir.join("policy.yaml").display(),
         memory = dir.join("memory").display(),
         io = dir.join("io").display(),

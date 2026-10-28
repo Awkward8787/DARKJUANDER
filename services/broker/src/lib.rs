@@ -422,17 +422,16 @@ mod tests {
         }
     }
 
-    fn broker(dir: &Path) -> Broker {
-        Broker::new(
-            Policy::bundled(),
-            AuditLog::open(dir.join("audit.log")).unwrap(),
-        )
+    fn broker(dir: &Path) -> (Broker, dj_audit::TestSigner) {
+        let signer = dj_audit::spawn_test_signer().unwrap();
+        let log = AuditLog::open(dir.join("audit.log"), &signer.paths).unwrap();
+        (Broker::new(Policy::bundled(), log), signer)
     }
 
     #[test]
     fn tainted_email_is_prompted_and_denied() {
         let dir = tempfile::tempdir().unwrap();
-        let broker = broker(dir.path());
+        let (broker, _signer) = broker(dir.path());
         let labels = Labels {
             integrity: Integrity::Untrusted,
             origin: "web:page".into(),
@@ -452,7 +451,9 @@ mod tests {
             .unwrap();
         assert!(!authz.allowed);
         assert!(authz.prompted);
-        let records = dj_audit::read_records(&dir.path().join("audit.log")).unwrap();
+        let records =
+            dj_audit::read_records(&dir.path().join("audit.log"), &_signer.paths.verifying_key)
+                .unwrap();
         let kinds: Vec<_> = records.iter().map(|r| r.kind.as_str()).collect();
         assert!(kinds.contains(&"approval_prompt"));
         assert!(kinds.contains(&"denial"));

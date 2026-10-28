@@ -1,0 +1,37 @@
+[Unit]
+Description=DARKJUANDER audit checkpoint signer
+After=local-fs.target
+Before=umbrad.service
+
+[Service]
+Type=simple
+User=dj-audit
+Group=dj-umbra
+ExecStart=/usr/bin/dj-auditd
+StateDirectory=dj-audit
+StateDirectoryMode=0700
+RuntimeDirectory=dj-audit
+RuntimeDirectoryMode=0750
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/var/lib/dj-audit /run/dj-audit
+
+[Install]
+WantedBy=multi-user.target

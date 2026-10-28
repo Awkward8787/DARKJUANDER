@@ -1,5 +1,5 @@
 use crate::config::{ConfigError, FileConfig};
-use dj_audit::{AuditLog, Event};
+use dj_audit::{AuditLog, AuditPaths, Event};
 use dj_broker::{Broker, Principal};
 use dj_label::Labels;
 use dj_policy::Policy;
@@ -30,7 +30,6 @@ struct Inner {
     models: BTreeMap<String, ModelSpec>,
     aliases: BTreeMap<String, AliasSpec>,
     spans: Mutex<HashMap<String, StoredSpan>>,
-    span_seq: AtomicU64,
     last_labels: Mutex<HashMap<String, Labels>>,
     psi_override: Mutex<Option<umbra::PsiSnapshot>>,
     chat_seq: AtomicU64,
@@ -46,8 +45,14 @@ impl AppState {
         let policy = Policy::from_path(&cfg.policy_path).map_err(|err| {
             ConfigError::Invalid(format!("policy {}: {err}", cfg.policy_path.display()))
         })?;
-        let audit = AuditLog::open(&cfg.audit_path)
-            .map_err(|err| ConfigError::Invalid(format!("audit: {err}")))?;
+        let audit = AuditLog::open(
+            &cfg.audit_path,
+            &AuditPaths {
+                signer_socket: cfg.audit_signer_socket.clone(),
+                verifying_key: cfg.audit_verifying_key.clone(),
+            },
+        )
+        .map_err(|err| ConfigError::Invalid(format!("audit: {err}")))?;
         let mut models = BTreeMap::new();
         let mut registry = Registry::default();
         for (id, model) in &cfg.models {
@@ -130,13 +135,18 @@ impl AppState {
                 models,
                 aliases,
                 spans: Mutex::new(HashMap::new()),
-                span_seq: AtomicU64::new(0),
                 last_labels: Mutex::new(HashMap::new()),
                 psi_override: Mutex::new(None),
                 chat_seq: AtomicU64::new(0),
             }),
         })
     }
+}
+
+pub fn random_span_id() -> String {
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes).expect("os entropy for a span id");
+    format!("span-{}", hex::encode(bytes))
 }
 
 fn parse_location(value: &str) -> Result<Location, ConfigError> {
@@ -213,13 +223,8 @@ impl AppState {
     }
 
     pub fn store_span(&self, owner: String, text: String, labels: Labels) -> StoredSpan {
-        let n = self
-            .inner
-            .span_seq
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1;
         let span = StoredSpan {
-            id: format!("span-{n}"),
+            id: random_span_id(),
             owner,
             text,
             labels,
@@ -262,5 +267,23 @@ impl AppState {
             return snapshot;
         }
         umbra::psi::read_snapshot(&self.inner.cfg.psi_memory_path, &self.inner.cfg.psi_io_path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::random_span_id;
+
+    #[test]
+    fn span_ids_are_128_bits_and_not_sequential() {
+        let first = random_span_id();
+        let second = random_span_id();
+        assert_ne!(first, second);
+        assert!(first.starts_with("span-"));
+        let hex_id = first.trim_start_matches("span-");
+        assert_eq!(hex_id.len(), 32);
+        assert!(hex_id.chars().all(|ch| ch.is_ascii_hexdigit()));
+        assert_ne!(first, "span-1");
+        assert_ne!(second, "span-2");
     }
 }

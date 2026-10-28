@@ -4,7 +4,8 @@
 
 What the image definition configures:
 
-- `umbrad.service` in `umbra-weights.slice`, with systemd sandboxing and localhost-only IP filtering.
+- `dj-auditd.service` as user `dj-audit`. The signing seed and the signer's copy of the chain stay in `/var/lib/dj-audit` (mode `0700`, seed mode `0600`). The verifying key is published at `/run/dj-audit/audit.ed25519.pub` so `umbrad` can read it without listing the seed directory. `umbrad` can connect to `/run/dj-audit/signer.sock`. The signer accepts only uid `dj-umbra` and only a record that extends its last signed head. Offline verify still accepts an older log when that log is restored together with the checkpoint signed for it.
+- `umbrad.service` in `umbra-weights.slice`, with systemd sandboxing and localhost-only IP filtering. It starts after `dj-auditd`.
 - nftables default-deny inbound, loopback and ICMP accepted, forwarding dropped.
 - sysctl: hide kernel pointers, restrict dmesg, disable unprivileged BPF, restrict ptrace, disable kexec.
 - sshd disabled when the unit exists. The rpm-ostree count-me timer is masked when it exists.
