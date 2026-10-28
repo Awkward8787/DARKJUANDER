@@ -5,6 +5,8 @@
 # admin principal invent memory pressure and steer routing.
 socket: /run/darkjuander/umbrad.sock
 audit_path: /var/lib/darkjuander/audit.log
+audit_signer_socket: /run/dj-audit/signer.sock
+audit_verifying_key: /var/lib/dj-audit/audit.ed25519.pub
 policy_path: /usr/share/darkjuander/policy/default.yaml
 local_only: true
 prefer_cloud: false

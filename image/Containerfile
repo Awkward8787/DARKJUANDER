@@ -24,6 +24,7 @@ RUN if [ -f /usr/lib/systemd/system/sshd.service ]; then systemctl disable sshd.
 
 COPY out/stage/umbrad /usr/bin/umbrad
 COPY out/stage/dj /usr/bin/dj
+COPY out/stage/dj-auditd /usr/bin/dj-auditd
 COPY policy/default.yaml /usr/share/darkjuander/policy/default.yaml
 COPY examples/config/umbrad.yaml /etc/darkjuander/umbrad.yaml
 COPY image/systemd/ /usr/lib/systemd/system/
@@ -33,7 +34,7 @@ COPY image/sysusers.d/darkjuander.conf /usr/lib/sysusers.d/darkjuander.conf
 COPY image/tmpfiles.d/darkjuander.conf /usr/lib/tmpfiles.d/darkjuander.conf
 COPY image/selinux/ /usr/share/darkjuander/selinux/
 
-RUN systemctl enable umbrad.service nftables.service
+RUN systemctl enable dj-auditd.service umbrad.service nftables.service
 
 LABEL org.opencontainers.image.title="dj-base" \
       org.opencontainers.image.description="DARKJUANDER hardened bootc image definition. Not signed." \

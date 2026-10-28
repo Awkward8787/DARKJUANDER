@@ -20,10 +20,11 @@ tests. Passing them does not mean DARKJUANDER enforces the PRD threat model.
   through some other channel, or into a different session that never touched
   the file, is not caught. Content inspection (PRD PE-6 and PE-7) is not built.
 - The audit log detects truncation and field swaps against its signed
-  checkpoint. It is not encrypted. Replacing the signing key and the log
-  together looks like a new install. The key is `{log_dir}/keys/audit.ed25519`
-  unless `DJ_AUDIT_SIGNING_KEY` points somewhere else. Agents must not be able
-  to write that file.
+  checkpoint. `dj-auditd` holds the signing seed as user `dj-audit`. `umbrad`
+  only has the socket and the published verifying key at
+  `/var/lib/dj-audit/audit.ed25519.pub`. A compromised `umbrad` cannot make the
+  signer rewind a head. This still is not a TPM: root, or anyone who gets
+  `dj-audit`'s uid, can sign. The log is not encrypted.
 - `workspace = "/"` is rejected. The seccomp profile is still a denylist, not
   an allowlist. cgroup limits and the SELinux domain are not enforced by these
   tests.

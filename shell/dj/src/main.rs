@@ -33,8 +33,13 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum AuditCommand {
-    /// Exit 0 when every line matches the chain.
-    Verify { path: PathBuf },
+    /// Exit 0 when every line matches the chain and the signed checkpoint.
+    Verify {
+        path: PathBuf,
+        /// Published ed25519 verifying key. Defaults to /var/lib/dj-audit/audit.ed25519.pub.
+        #[arg(long)]
+        verifying_key: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -74,8 +79,14 @@ fn real_main() -> Result<ExitCode, String> {
     let args = Args::parse();
     match args.command {
         Command::Audit { command } => match command {
-            AuditCommand::Verify { path } => {
-                let report = dj_audit::verify_file(&path).map_err(|err| err.to_string())?;
+            AuditCommand::Verify {
+                path,
+                verifying_key,
+            } => {
+                let verifying_key =
+                    verifying_key.unwrap_or_else(|| PathBuf::from(dj_audit::DEFAULT_VERIFYING_KEY));
+                let report =
+                    dj_audit::verify_file(&path, &verifying_key).map_err(|err| err.to_string())?;
                 println!("audit ok: {} entries, head {}", report.entries, report.head);
                 Ok(ExitCode::SUCCESS)
             }

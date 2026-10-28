@@ -14,6 +14,7 @@ dj-policy.workspace = true
 umbra.workspace = true
 axum.workspace = true
 bytes.workspace = true
+getrandom.workspace = true
 hex.workspace = true
 http.workspace = true
 http-body-util.workspace = true

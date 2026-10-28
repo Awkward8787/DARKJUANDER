@@ -1,6 +1,7 @@
 [Unit]
 Description=DARKJUANDER UMBRA neural core
-After=local-fs.target
+After=local-fs.target dj-auditd.service
+Requires=dj-auditd.service
 # The whole daemon sits in the shared weights slice. Per-request cgroup
 # migration into the caller's cgroup is planned and not implemented.
 Slice=umbra-weights.slice

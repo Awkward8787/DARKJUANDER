@@ -26,6 +26,7 @@ Follow-ups that this PR deliberately did not build. Priority names are the PRD's
 | SB-8 | No kill switch UI. Stopping the process is left to the operator. |
 | PB-4, PB-6, UI-3 | Approval is fail-closed. There is no trusted dialog. |
 | AU-3 | The log is not encrypted. |
+| AU-8 | The audit seed is not sealed to a TPM. `dj-auditd` keeps it under a separate uid, which stops `umbrad` from re-signing a truncated log. A TPM-backed key is the next step. |
 | UM-2 | Shared residency is one engine object in-process. llama.cpp is not yet the shared process, and RSS is unmeasured. |
 | UM-5 | Cache keys partition by trust domain. Hits do not restore a llama.cpp slot, so the TTFT target is unmeasured. |
 | UM-7 | PSI fallback works against a pressure file or the demo override. It has not been timed against `stress-ng` in a guest. The image default leaves the override off. |

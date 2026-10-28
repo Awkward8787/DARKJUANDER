@@ -18,6 +18,10 @@ pub enum ConfigError {
 pub struct FileConfig {
     pub socket: PathBuf,
     pub audit_path: PathBuf,
+    #[serde(default = "default_signer_socket")]
+    pub audit_signer_socket: PathBuf,
+    #[serde(default = "default_verifying_key")]
+    pub audit_verifying_key: PathBuf,
     pub policy_path: PathBuf,
     #[serde(default)]
     pub local_only: bool,
@@ -77,6 +81,14 @@ pub struct PrincipalConfig {
 
 fn default_threshold() -> f64 {
     25.0
+}
+
+fn default_signer_socket() -> PathBuf {
+    PathBuf::from(dj_audit::DEFAULT_SIGNER_SOCKET)
+}
+
+fn default_verifying_key() -> PathBuf {
+    PathBuf::from(dj_audit::DEFAULT_VERIFYING_KEY)
 }
 
 impl FileConfig {

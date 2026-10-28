@@ -25,6 +25,7 @@ cargo build --workspace --release --locked
 mkdir -p out/stage
 install -m 0755 target/release/umbrad out/stage/umbrad
 install -m 0755 target/release/dj out/stage/dj
+install -m 0755 target/release/dj-auditd out/stage/dj-auditd
 
 tag=${DJ_IMAGE_TAG:-localhost/dj-base:0.1.0}
 podman build --platform "${platform}" -f image/Containerfile -t "${tag}" .
