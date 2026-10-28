@@ -36,7 +36,7 @@ enum AuditCommand {
     /// Exit 0 when every line matches the chain and the signed checkpoint.
     Verify {
         path: PathBuf,
-        /// Published ed25519 verifying key. Defaults to /var/lib/dj-audit/audit.ed25519.pub.
+        /// Published ed25519 verifying key. Defaults to /run/dj-audit/audit.ed25519.pub.
         #[arg(long)]
         verifying_key: Option<PathBuf>,
     },

@@ -1,10 +1,11 @@
 //! Signing service for the audit checkpoint.
 //!
 //! Runs as its own user. The seed stays in that user's state directory.
-//! `umbrad` sends heads over the unix socket and never sees the seed.
+//! `umbrad` sends the appended record over the unix socket and never sees the seed.
 
 use dj_audit::{
-    serve_signer as serve, DEFAULT_SIGNER_SOCKET, DEFAULT_SIGNING_KEY, DEFAULT_VERIFYING_KEY,
+    expected_writer_uid, serve_signer as serve, DEFAULT_SIGNER_SOCKET, DEFAULT_SIGNING_KEY,
+    DEFAULT_VERIFYING_KEY,
 };
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -41,6 +42,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let shutdown = AtomicBool::new(false);
-    serve(&key, &public, &socket, &shutdown)?;
+    serve(&key, &public, &socket, &shutdown, expected_writer_uid())?;
     Ok(())
 }

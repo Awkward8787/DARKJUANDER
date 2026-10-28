@@ -7,14 +7,14 @@
 //! Truncating the log, emptying it, or appending after a truncate fails.
 //!
 //! The signing seed is not stored next to the log. `dj-auditd` holds it as a
-//! different user and signs heads over a unix socket. [`verify_file`] reads
-//! only the published verifying key. A writer who can edit the log but cannot
-//! make the signer go backwards cannot hide a truncated chain.
+//! different user, keeps its own copy of the signed records, and signs a new
+//! head only when the appended record extends that copy. [`verify_file`] reads
+//! only the published verifying key. A writer who can edit the log cannot
+//! hide a truncated or rewritten chain without the signer's uid.
 //!
-//! That split stops a compromised `umbrad`. It does not stop root, and it is
-//! not a TPM. Sealing the seed to a TPM is still roadmap work. Until then the
-//! signer protects against offline edits by someone who does not have the
-//! signer's uid.
+//! `umbrad` can still append. Offline verify cannot detect a rollback to an
+//! older log plus the checkpoint signed for that log. This is not a TPM.
+//! Sealing the seed, and anchoring the head, is still roadmap work.
 //!
 //! If a crash lands after the record is synced and before the checkpoint is
 //! replaced, `open` accepts that single trailing record once it chains from
@@ -36,8 +36,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 pub use signer::{
-    serve as serve_signer, spawn_test_signer, AuditPaths, TestSigner, DEFAULT_SIGNER_SOCKET,
-    DEFAULT_SIGNING_KEY, DEFAULT_VERIFYING_KEY,
+    expected_writer_uid, serve as serve_signer, spawn_test_signer, AuditPaths, TestSigner,
+    DEFAULT_SIGNER_SOCKET, DEFAULT_SIGNING_KEY, DEFAULT_VERIFYING_KEY,
 };
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -143,13 +143,7 @@ impl AuditLog {
             }
             let record = genesis_record();
             write_record(&file, &record)?;
-            commit_checkpoint(
-                &checkpoint_path(&path),
-                &signer,
-                &verifying,
-                1,
-                &record.hash,
-            )?;
+            commit_checkpoint(&checkpoint_path(&path), &signer, &verifying, &record)?;
             (record.seq, record.hash)
         } else {
             let records = parse_chain(&existing)?;
@@ -208,13 +202,11 @@ impl AuditLog {
             hash: hash.clone(),
         };
         write_record(&inner.file, &record)?;
-        let count = seq + 1;
         if let Err(err) = commit_checkpoint(
             &checkpoint_path(&inner.path),
             &inner.signer,
             &inner.verifying,
-            count,
-            &record.hash,
+            &record,
         ) {
             inner.poisoned = true;
             inner.seq = seq;
@@ -420,18 +412,18 @@ fn commit_checkpoint(
     path: &Path,
     signer: &SignerClient,
     verifying: &VerifyingKey,
-    count: u64,
-    head: &str,
+    record: &Record,
 ) -> Result<(), AuditError> {
-    let signature = signer.sign(count, head)?;
+    let signature = signer.sign_record(record)?;
+    let count = record.seq + 1;
     let parsed = Signature::from_slice(&signature)
         .map_err(|err| AuditError::Corrupt(format!("signer returned a bad signature: {err}")))?;
     verifying
-        .verify(checkpoint_message(count, head).as_bytes(), &parsed)
+        .verify(checkpoint_message(count, &record.hash).as_bytes(), &parsed)
         .map_err(|_| {
             AuditError::Corrupt("signer signature does not match the verifying key".into())
         })?;
-    write_checkpoint(path, count, head, &signature)
+    write_checkpoint(path, count, &record.hash, &signature)
 }
 
 fn align_checkpoint(
@@ -448,7 +440,7 @@ fn align_checkpoint(
         }
         CheckpointFit::OneAhead => {
             let last = records.last().expect("chain is non-empty");
-            commit_checkpoint(&path, signer, verifying, records.len() as u64, &last.hash)?;
+            commit_checkpoint(&path, signer, verifying, last)?;
             Ok((last.seq, last.hash.clone()))
         }
     }
@@ -557,6 +549,21 @@ fn write_checkpoint(
     }
     fs::rename(&tmp, path)?;
     Ok(())
+}
+
+pub(crate) fn recompute_record_hash(record: &Record) -> String {
+    hash_event(
+        record.seq,
+        &record.time,
+        &record.kind,
+        &record.actor,
+        &record.action,
+        &record.outcome,
+        &record.reason,
+        &record.labels,
+        &record.details,
+        &record.prev_hash,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -827,9 +834,128 @@ mod tests {
             .collect();
         fs::write(&harness.path, kept).unwrap();
         let client = signer::SignerClient::new(&harness.signer.paths.signer_socket);
-        let err = client.sign(3, &"0".repeat(64)).unwrap_err();
+        let forged = build_record(2, &"0".repeat(64), event("scrubbed"));
+        let err = client.sign_record(&forged).unwrap_err();
         assert!(err.to_string().contains("refusing"), "{err}");
         assert!(harness.verify().is_err());
+    }
+
+    #[test]
+    fn forward_rewrite_is_refused() {
+        let harness = Harness::new();
+        let log = harness.open();
+        log.append(event("exfiltrate.secrets")).unwrap();
+        log.append(event("after")).unwrap();
+        drop(log);
+        let client = signer::SignerClient::new(&harness.signer.paths.signer_socket);
+
+        let blind = client
+            .transact(&json!({
+                "op": "sign",
+                "count": 4,
+                "head": "ff".repeat(32),
+            }))
+            .unwrap();
+        let blind_err = blind.get("error").and_then(Value::as_str).unwrap_or("");
+        assert!(
+            blind_err.contains("record"),
+            "bare head was signed: {blind}"
+        );
+
+        let report = harness.verify().unwrap();
+        let mut tampered = build_record(3, &report.head, event("benign-padding"));
+        tampered.hash = "ff".repeat(32);
+        let err = client.sign_record(&tampered).unwrap_err();
+        assert!(
+            err.to_string().contains("canonical"),
+            "tampered hash was accepted: {err}"
+        );
+
+        let mut prev = GENESIS.to_string();
+        let mut tip = None;
+        for (seq, action) in [(1u64, "padding-a"), (2, "padding-b"), (3, "padding-c")] {
+            let record = build_record(seq, &prev, event(action));
+            prev = record.hash.clone();
+            tip = Some(record);
+        }
+        let err = client.sign_record(tip.as_ref().unwrap()).unwrap_err();
+        assert!(
+            err.to_string().contains("refusing"),
+            "scrubbed chain was signed: {err}"
+        );
+
+        let copy = fs::read_to_string(
+            harness
+                .signer
+                .key_path
+                .with_file_name("signed-records.jsonl"),
+        )
+        .unwrap();
+        assert!(copy.contains("exfiltrate.secrets"));
+        let log_text = fs::read_to_string(&harness.path).unwrap();
+        assert!(log_text.contains("exfiltrate.secrets"));
+        assert_eq!(harness.verify().unwrap().entries, 3);
+
+        let log = harness.open();
+        log.append(event("still-appended")).unwrap();
+        drop(log);
+        let text = fs::read_to_string(&harness.path).unwrap();
+        assert!(text.contains("exfiltrate.secrets"));
+        assert_eq!(harness.verify().unwrap().entries, 4);
+    }
+
+    #[test]
+    fn peer_uid_mismatch_is_rejected() {
+        let signer = signer::spawn_test_signer_for(u32::MAX).unwrap();
+        let client = signer::SignerClient::new(&signer.paths.signer_socket);
+        let record = build_record(0, GENESIS, event("nope"));
+        let err = client.sign_record(&record).unwrap_err();
+        assert!(err.to_string().contains("peer uid"), "{err}");
+    }
+
+    #[test]
+    fn idle_client_does_not_stall_signing() {
+        let harness = Harness::new();
+        let idle =
+            std::os::unix::net::UnixStream::connect(&harness.signer.paths.signer_socket).unwrap();
+        let started = std::time::Instant::now();
+        let log = harness.open();
+        log.append(event("still-works")).unwrap();
+        let elapsed = started.elapsed();
+        drop(log);
+        drop(idle);
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "an idle signer client stalled checkpointing for {elapsed:?}"
+        );
+        assert!(harness.verify().is_ok());
+    }
+
+    #[test]
+    fn signing_state_directory_is_mode_0700() {
+        let harness = Harness::new();
+        let dir = harness.signer.key_path.parent().unwrap();
+        let mode = fs::metadata(dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "signer state dir mode was {mode:o}");
+        let tmpfiles = fs::read_to_string(repo_path("image/tmpfiles.d/darkjuander.conf")).unwrap();
+        assert!(
+            tmpfiles.contains("d /var/lib/dj-audit 0700 dj-audit dj-audit -"),
+            "{tmpfiles}"
+        );
+        let unit = fs::read_to_string(repo_path("image/systemd/dj-auditd.service")).unwrap();
+        assert!(unit.contains("StateDirectoryMode=0700"), "{unit}");
+    }
+
+    #[test]
+    fn auditd_unit_denies_suid_wx_and_clock() {
+        let unit = fs::read_to_string(repo_path("image/systemd/dj-auditd.service")).unwrap();
+        for line in [
+            "RestrictSUIDSGID=yes",
+            "MemoryDenyWriteExecute=yes",
+            "ProtectClock=yes",
+        ] {
+            assert!(unit.contains(line), "missing {line}");
+        }
     }
 
     #[test]
@@ -866,6 +992,12 @@ mod tests {
     #[test]
     fn unix_epoch_formats() {
         assert_eq!(format_rfc3339(0, 0), "1970-01-01T00:00:00.000Z");
+    }
+
+    fn repo_path(rel: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(rel)
     }
 
     #[test]
