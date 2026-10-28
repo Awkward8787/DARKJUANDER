@@ -7,6 +7,7 @@ Follow-ups that this PR deliberately did not build. Priority names are the PRD's
 - Build `dj-base` with `scripts/build-image.sh` and `scripts/build-disk.sh` on an aarch64 Linux host and boot it in UTM. Record the console and `scripts/check-kernel-config.sh` from inside the guest.
 - Sign the image (BASE-4). cosign is the planned tool. Nothing is signed now.
 - Compile and load an SELinux domain for `umbrad` and for agents (BASE-5, SB-4). The draft in `image/selinux/` is not that domain.
+- Boot the image and look at the Plymouth theme, the GRUB theme, the wallpaper, and `/etc/issue`. The files are installed by `image/apply-branding.sh` and have not been booted. The brand guide's status motd stays planned and is not hard-coded.
 
 ## Phase 1, P0 not finished
 

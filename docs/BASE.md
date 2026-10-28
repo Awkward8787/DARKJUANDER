@@ -10,6 +10,15 @@ What the image definition configures:
 - sysctl: hide kernel pointers, restrict dmesg, disable unprivileged BPF, restrict ptrace, disable kexec.
 - sshd disabled when the unit exists. The rpm-ostree count-me timer is masked when it exists.
 - `dj-llama.service` installed and not enabled.
+- Umbra Eclipse branding, via `image/apply-branding.sh`. This has not been booted. The build fails if a listed asset is missing or empty.
+  - Plymouth theme `darkjuander` at `/usr/share/plymouth/themes/darkjuander`, set as the default with `plymouth-set-default-theme`. `image/dracut/darkjuander-plymouth.conf` adds the plymouth module for a later initramfs build. The container build does not run dracut. The logo and wordmark are PNGs. The passphrase and status lines in the script ask for the Inter font, and whether the initramfs can resolve that font has not been tested.
+  - GRUB theme at `/usr/share/grub/themes/darkjuander`. `grub2-mkfont` writes `inter_regular_18.pf2` and `jetbrains_mono_16.pf2` during the image build, from the OFL fonts instantiated at the weights in `branding/scripts/build.py`. `GRUB_THEME` in `/etc/default/grub` points at that `theme.txt`. bootupd owns the bootloader on bootc, and GRUB may only read a theme from the boot partition. That has not been tested.
+  - Wallpapers at `/usr/share/backgrounds/darkjuander/`. `default.png` and `/usr/share/backgrounds/default.png` point at `darkjuander-3840x2160.png`. `/usr/share/gnome-background-properties/darkjuander.xml` names the same file. No desktop or greeter is installed, so nothing displays it yet.
+  - hicolor icon `darkjuander` under `/usr/share/icons/hicolor/`. `LOGO=darkjuander` uses that name.
+  - Terminal color schemes under `/usr/share/darkjuander/terminal/`.
+  - OFL fonts and their license files under `/usr/share/fonts/darkjuander/`.
+  - `/usr/lib/os-release`: `NAME="DARKJUANDER"`, `PRETTY_NAME="DARKJUANDER"`, `LOGO=darkjuander`, `HOME_URL="https://github.com/Awkward8787/DARKJUANDER"`, `ID_LIKE=fedora`. Other fields, including `ID`, stay as the Fedora base image set them.
+  - `/etc/issue` is the login greeting from the brand guide: "Welcome back. Your agents are where you left them." The status motd in that guide is marked planned, and this image does not install it.
 
 What it does not do:
 
@@ -17,6 +26,7 @@ What it does not do:
 - It does not enroll Secure Boot or seal a LUKS key to a TPM.
 - It does not load `image/selinux/darkjuander.te`.
 - CI has not run `podman build` or `bootc-image-builder`.
+- The Plymouth theme, GRUB theme, wallpaper, and `/etc/issue` greeting have not been seen on a boot.
 
 ## Fedora 45 kernel options
 

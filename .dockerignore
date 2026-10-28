@@ -5,3 +5,6 @@ target
 **/*.raw
 **/*.iso
 out/disk
+branding/src/fonts/.instances
+branding/grub/darkjuander/*.pf2
+**/__pycache__

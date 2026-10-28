@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512.0 512.0" width="512" height="512"><title>DARKJUANDER</title>
+
+<g transform="translate(0.00,0.00) scale(1.00000)"><mask id="ecl1c" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512"><rect width="512" height="512" fill="#fff"/><circle cx="237.0" cy="270.0" r="190" fill="#000"/></mask>
+<circle cx="275.0" cy="242.0" r="178" fill="#9D8CFF" mask="url(#ecl1c)"/>
+<circle cx="237.0" cy="270.0" r="178" fill="#1B2029"/>
+<polyline points="145.0,332.0 231.0,288.0 307.0,204.0" fill="none" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" stroke="#E6E9F0"/>
+<circle cx="145.0" cy="332.0" r="20" fill="#1B2029" stroke="#E6E9F0" stroke-width="10"/>
+<circle cx="231.0" cy="288.0" r="18" fill="#E6E9F0"/>
+<circle cx="307.0" cy="204.0" r="28" fill="#9D8CFF"/></g>
+</svg>

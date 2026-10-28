@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512.0 512.0" width="512" height="512"><title>DARKJUANDER</title>
+
+<g transform="translate(0.00,0.00) scale(1.00000)"><clipPath id="lat30h"><path d="M256.0,34.0 L448.3,145.0 L448.3,367.0 L256.0,478.0 L63.7,367.0 L63.7,145.0 Z"/></clipPath>
+<rect x="0" y="0" width="256" height="512" fill="#FFFFFF" clip-path="url(#lat30h)"/>
+<path d="M256.0,34.0 L448.3,145.0 L448.3,367.0 L256.0,478.0 L63.7,367.0 L63.7,145.0 Z" fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linejoin="round"/>
+<circle cx="326" cy="256" r="46" fill="#FFFFFF"/></g>
+</svg>

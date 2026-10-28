@@ -1,6 +1,13 @@
 # Licenses
 
-DARKJUANDER components in this repository are Apache-2.0. See `LICENSE`.
+Code in this repository is Apache-2.0. See `LICENSE`. Brand assets under `branding/` are proprietary to Anthony Jaamal Jones and Vibe Virtue Enterprise LLC. See `branding/LICENSE-BRAND.md`. DARKJUANDER is not a registered trademark. The Apache-2.0 grant does not cover those names or marks.
+
+Vendored with the brand kit, and not under Apache-2.0:
+
+| Piece | License | How it is used |
+|---|---|---|
+| Space Grotesk, Inter, JetBrains Mono (`branding/src/fonts/`) | SIL Open Font License 1.1 (`OFL-*.txt` next to each font) | Shipped in the image under `/usr/share/fonts/darkjuander/` and used to build GRUB `.pf2` fonts. The license files ship with them. |
+| Logos, wallpapers, Plymouth and GRUB artwork, icons, terminal color schemes | Proprietary. `branding/LICENSE-BRAND.md` | Installed by the image definition. Not the code license. |
 
 Third-party pieces we use but do not vendor:
 

@@ -14,6 +14,11 @@ RUN dnf -y install --setopt=install_weak_deps=False \
       stress-ng \
       openssl \
       ca-certificates \
+      plymouth \
+      plymouth-scripts \
+      grub2-tools-extra \
+      python3-fonttools \
+      hicolor-icon-theme \
     && dnf clean all
 
 # BASE-6: do not listen on the network by default. sshd is disabled when the
@@ -34,8 +39,25 @@ COPY image/sysusers.d/darkjuander.conf /usr/lib/sysusers.d/darkjuander.conf
 COPY image/tmpfiles.d/darkjuander.conf /usr/lib/tmpfiles.d/darkjuander.conf
 COPY image/selinux/ /usr/share/darkjuander/selinux/
 
-RUN systemctl enable dj-auditd.service umbrad.service nftables.service
+# Umbra Eclipse branding. image/apply-branding.sh fails the build if one of
+# these assets is missing. None of this has been booted.
+COPY branding/plymouth/darkjuander /usr/share/plymouth/themes/darkjuander
+COPY branding/grub/darkjuander /usr/share/grub/themes/darkjuander
+COPY branding/wallpapers /usr/share/backgrounds/darkjuander
+COPY branding/os-icon/hicolor /usr/share/icons/hicolor
+COPY branding/terminal /usr/share/darkjuander/terminal
+COPY branding/src/fonts /usr/share/fonts/darkjuander
+COPY image/dracut/darkjuander-plymouth.conf /usr/lib/dracut/dracut.conf.d/darkjuander-plymouth.conf
+COPY image/backgrounds/darkjuander.xml /usr/share/gnome-background-properties/darkjuander.xml
+COPY image/apply-branding.sh /tmp/apply-branding.sh
 
+RUN systemctl enable dj-auditd.service umbrad.service nftables.service \
+    && bash /tmp/apply-branding.sh \
+    && rm -f /tmp/apply-branding.sh
+
+# Apache-2.0 is the project code. Brand files are proprietary
+# (branding/LICENSE-BRAND.md). The OFL fonts keep their own licenses.
+# Fedora packages keep theirs. This image has not been booted.
 LABEL org.opencontainers.image.title="dj-base" \
       org.opencontainers.image.description="DARKJUANDER hardened bootc image definition. Not signed." \
       org.opencontainers.image.version="${DJ_VERSION}" \
