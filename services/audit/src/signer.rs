@@ -111,8 +111,17 @@ impl SignerClient {
         })?;
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-        stream.write_all(&serde_json::to_vec(request)?)?;
-        stream.write_all(b"\n")?;
+        // A busy or rejected signer can answer and close before this write
+        // finishes. The error line is still sitting in the receive buffer.
+        let payload = serde_json::to_vec(request)?;
+        if let Err(err) = stream
+            .write_all(&payload)
+            .and_then(|_| stream.write_all(b"\n"))
+        {
+            if err.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(err.into());
+            }
+        }
         let mut line = String::new();
         BufReader::new(stream).read_line(&mut line)?;
         if line.is_empty() {
@@ -413,7 +422,9 @@ fn start_test_signer(
     public_path: PathBuf,
     expected_uid: u32,
 ) -> Result<TestSigner, AuditError> {
-    let _lock = TEST_SIGNER_LOCK.lock().expect("test signer lock");
+    let _lock = TEST_SIGNER_LOCK
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     let n = NEXT_SIGNER.fetch_add(1, Ordering::SeqCst);
     let socket = PathBuf::from(format!("/tmp/djaudit-{}-{n}.sock", std::process::id()));
     if socket.exists() {

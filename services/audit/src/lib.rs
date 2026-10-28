@@ -1008,26 +1008,9 @@ mod tests {
         .unwrap();
         let next = build_record(genesis.seq + 1, &genesis.hash, event("during-flood"));
         let client = signer::SignerClient::new(&harness.signer.paths.signer_socket);
-        let started = std::time::Instant::now();
-        let mut signed = false;
-        while started.elapsed() < std::time::Duration::from_secs(1) {
-            match client.sign_record(&next) {
-                Ok(_) => {
-                    signed = true;
-                    break;
-                }
-                Err(err)
-                    if err.to_string().contains("busy")
-                        || err.to_string().contains("timed out") =>
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(20));
-                }
-                Err(err) => panic!("signer failed during the flood: {err}"),
-            }
-        }
-        assert!(signed, "flood blocked signing for {:?}", started.elapsed());
+        sign_before_timeout(&client, &next);
         let after = build_record(next.seq + 1, &next.hash, event("after-flood"));
-        client.sign_record(&after).unwrap();
+        sign_before_timeout(&client, &after);
         drop(held);
     }
 
@@ -1044,17 +1027,51 @@ mod tests {
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
         assert_eq!(client_workers(), 0, "rejected peers were handed to workers");
+        let client = signer::SignerClient::new(&signer.paths.signer_socket);
         let started = std::time::Instant::now();
-        let err = signer::SignerClient::new(&signer.paths.signer_socket)
-            .sign_record(&build_record(0, GENESIS, event("nope")))
-            .unwrap_err();
-        assert!(err.to_string().contains("peer uid"), "{err}");
+        let mut rejection = None;
+        while started.elapsed() < std::time::Duration::from_secs(1) {
+            match client.sign_record(&build_record(0, GENESIS, event("nope"))) {
+                Ok(_) => panic!("rejected peer received a signature"),
+                Err(err) if err.to_string().contains("peer uid") => {
+                    rejection = Some(err.to_string());
+                    break;
+                }
+                Err(err) if transient_signer_error(&err) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(err) => panic!("unexpected signer error during rejected flood: {err}"),
+            }
+        }
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(1),
+            rejection.is_some(),
             "rejected flood stalled a later client for {:?}",
             started.elapsed()
         );
         drop(held);
+    }
+
+    fn transient_signer_error(err: &AuditError) -> bool {
+        let text = err.to_string();
+        text.contains("busy")
+            || text.contains("timed out")
+            || text.contains("Broken pipe")
+            || text.contains("Connection reset")
+            || text.contains("closed the socket")
+    }
+
+    fn sign_before_timeout(client: &signer::SignerClient, record: &Record) {
+        let started = std::time::Instant::now();
+        while started.elapsed() < std::time::Duration::from_secs(1) {
+            match client.sign_record(record) {
+                Ok(_) => return,
+                Err(err) if transient_signer_error(&err) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(err) => panic!("signer failed during the flood: {err}"),
+            }
+        }
+        panic!("flood blocked signing for {:?}", started.elapsed());
     }
 
     #[test]
