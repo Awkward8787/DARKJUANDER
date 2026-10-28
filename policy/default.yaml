@@ -1,0 +1,35 @@
+# DARKJUANDER default policy. First matching rule wins.
+# An unmatched action is denied. Loosening this file is a local decision;
+# the daemon does not phone home about it.
+version: 1
+default_decision: deny
+rules:
+  - id: private-data-stays-local
+    description: Private or secret inputs cannot take a cloud route.
+    match:
+      confidentiality_at_least: private
+      route: cloud
+    decision: deny
+    reason: private or secret data cannot be routed to a cloud model
+
+  - id: tainted-outbound-or-destructive
+    description: Untrusted context raises outbound and destructive actions to an approval prompt.
+    match:
+      integrity: untrusted
+      action_class_any: [outbound, destructive]
+    decision: approve
+    reason: untrusted content is in the context; outbound or destructive actions need approval
+
+  - id: standing-outbound-needs-approval
+    description: Outbound and destructive actions need approval even from trusted context.
+    match:
+      action_class_any: [outbound, destructive]
+    decision: approve
+    reason: outbound or destructive action needs approval
+
+  - id: allow-reads-and-model-use
+    description: Reads and model calls are allowed when a later broker grant also matches.
+    match:
+      action_class_any: [read, model]
+    decision: allow
+    reason: read and model use are allowed by policy when the broker grant matches

@@ -1,0 +1,9 @@
+[Unit]
+Description=DARKJUANDER sandboxed agents
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+CPUAccounting=yes
+IOAccounting=yes
+TasksAccounting=yes

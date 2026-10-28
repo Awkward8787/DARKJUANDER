@@ -1,0 +1,11 @@
+name = "research"
+version = "0.1.0"
+publisher = "darkjuander.local"
+trust_domain = "research"
+workspace = "/var/lib/darkjuander/agents/research"
+capabilities = [
+  "model.use:default-chat",
+  "files.read:/var/lib/darkjuander/agents/research",
+]
+memory_max = "1G"
+pids_max = 64

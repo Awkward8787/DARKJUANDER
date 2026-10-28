@@ -1,0 +1,21 @@
+[package]
+name = "umbrad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "DARKJUANDER UMBRA daemon"
+
+[[bin]]
+name = "umbrad"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+dj-gateway.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

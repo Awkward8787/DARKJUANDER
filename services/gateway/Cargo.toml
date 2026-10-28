@@ -1,0 +1,35 @@
+[package]
+name = "dj-gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Unix-socket OpenAI-compatible subset in front of UMBRA"
+
+[dependencies]
+dj-audit.workspace = true
+dj-broker.workspace = true
+dj-label.workspace = true
+dj-policy.workspace = true
+umbra.workspace = true
+axum.workspace = true
+bytes.workspace = true
+hex.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

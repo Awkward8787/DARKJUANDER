@@ -1,0 +1,7 @@
+.git
+target
+**/*.gguf
+**/*.qcow2
+**/*.raw
+**/*.iso
+out/disk

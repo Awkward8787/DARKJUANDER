@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: test
+        run: cargo test --workspace --locked
+      - name: demo scenes
+        run: ./scripts/run-demos.sh
+      - name: shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh
+      - name: containerfile and kernel-config script
+        run: |
+          ./scripts/check-containerfile.sh
+          ./scripts/check-kernel-config.sh tests/fixtures/kernel-good.config
+          if ./scripts/check-kernel-config.sh tests/fixtures/kernel-bad.config; then
+            echo "incomplete kernel config should fail"
+            exit 1
+          fi

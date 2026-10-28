@@ -1,0 +1,9 @@
+[Unit]
+Description=Shared UMBRA model weights
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+CPUAccounting=yes
+IOAccounting=yes
+TasksAccounting=yes

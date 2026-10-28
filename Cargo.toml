@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "services/label",
+    "services/audit",
+    "services/policy",
+    "services/broker",
+    "services/sandbox",
+    "services/umbra",
+    "services/gateway",
+    "services/umbrad",
+    "shell/dj",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+rust-version = "1.83"
+
+[workspace.dependencies]
+dj-label = { path = "services/label" }
+dj-audit = { path = "services/audit" }
+dj-policy = { path = "services/policy" }
+dj-broker = { path = "services/broker" }
+dj-sandbox = { path = "services/sandbox" }
+umbra = { path = "services/umbra" }
+dj-gateway = { path = "services/gateway" }
+
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.132"
+serde_yaml = "0.9.34"
+thiserror = "1.0.64"
+sha2 = "0.10.8"
+hex = "0.4.3"
+clap = { version = "4.5.20", features = ["derive"] }
+tokio = { version = "1.41.1", features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "sync", "time", "signal"] }
+axum = "0.7.9"
+hyper = "1.5.1"
+hyper-util = { version = "0.1.10", features = ["tokio"] }
+tower = { version = "0.5.1", features = ["util"] }
+http = "1.1.0"
+http-body-util = "0.1.2"
+bytes = "1.8.0"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
+landlock = "0.4.4"
+libc = "0.2.161"
+ureq = { version = "2.12.1", default-features = false, features = ["tls", "json"] }
+toml = "0.8.19"
+tempfile = "3.13.0"
+ed25519-dalek = { version = "2.1.1", default-features = false, features = ["std"] }
+getrandom = "0.2.15"
+fs2 = "0.4.3"
+serde_derive = "1.0.210"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
