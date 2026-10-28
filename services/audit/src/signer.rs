@@ -1,16 +1,17 @@
-//! `dj-auditd` holds the ed25519 seed and an append-only copy of every
-//! record it has signed.
+//! `dj-auditd` holds the ed25519 seed and the last record it signed.
 //!
 //! A sign request carries the next record. The signer recomputes that
 //! record's hash from canonical JSON and accepts it only when it extends
 //! the last signed record (`seq` is one past the previous record, and
 //! `prev_hash` is that record's hash). It then signs the new head. A bare
-//! count and head are not enough.
+//! count and head are not enough. Only that tip is kept in memory and on
+//! disk; the hash chain itself lives in the audit log.
 //!
-//! The seed and the record copy live in `/var/lib/dj-audit` (mode `0700`).
-//! The verifying key is published under `/run/dj-audit` so `umbrad` can read
-//! it without traversing the seed directory. Only `dj-umbra`'s uid may
-//! request a signature.
+//! The seed, the tip, and a durable copy of the verifying key live in
+//! `/var/lib/dj-audit` (mode `0700`). The same verifying key is also
+//! published under `/run/dj-audit` so `umbrad` can read it without
+//! traversing the seed directory. Only `dj-umbra`'s uid may request a
+//! signature, and only a few of those requests run at once.
 //!
 //! This is not a TPM. Root, or anyone who can write the signer's state
 //! directory, can still produce signatures. Offline verify also cannot see
@@ -20,14 +21,15 @@
 
 use crate::{checkpoint_message, AuditError};
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -35,7 +37,15 @@ pub const DEFAULT_SIGNER_SOCKET: &str = "/run/dj-audit/signer.sock";
 /// Group-readable path. The seed directory is mode `0700`, so the verifying
 /// key cannot live beside the seed and still be readable by `umbrad`.
 pub const DEFAULT_VERIFYING_KEY: &str = "/run/dj-audit/audit.ed25519.pub";
+/// Persistent copy of the verifying key, next to the seed. Not a secret.
+/// Use it for `dj audit verify` when `/run` is gone.
+pub const DURABLE_VERIFYING_KEY: &str = "/var/lib/dj-audit/audit.ed25519.pub";
 pub const DEFAULT_SIGNING_KEY: &str = "/var/lib/dj-audit/audit.ed25519";
+
+/// How many authorized clients may be inside a request at once.
+pub(crate) const MAX_INFLIGHT_CLIENTS: usize = 8;
+const TIP_FILE: &str = "signed-tip.json";
+const LEGACY_RECORDS: &str = "signed-records.jsonl";
 
 #[derive(Clone, Debug)]
 pub struct AuditPaths {
@@ -123,8 +133,18 @@ pub fn serve(
 ) -> Result<(), AuditError> {
     let key = Arc::new(load_or_create_signing_key(key_path)?);
     publish_verifying_key(public_path, &key.verifying_key())?;
-    let records_path = key_path.with_file_name("signed-records.jsonl");
-    let signed = Arc::new(std::sync::Mutex::new(load_signed_records(&records_path)?));
+    let durable_public = key_path.with_file_name("audit.ed25519.pub");
+    if durable_public != public_path {
+        publish_verifying_key(&durable_public, &key.verifying_key())?;
+    }
+    let tip_path = key_path.with_file_name(TIP_FILE);
+    let state = Arc::new(SignerState {
+        key,
+        tip: Mutex::new(load_signed_tip(&tip_path)?),
+        tip_path,
+        inflight: Arc::new(AtomicUsize::new(0)),
+        expected_uid,
+    });
     if socket_path.exists() {
         let _ = fs::remove_file(socket_path);
     }
@@ -136,14 +156,7 @@ pub fn serve(
     listener.set_nonblocking(true)?;
     while !shutdown.load(Ordering::SeqCst) {
         match listener.accept() {
-            Ok((stream, _)) => {
-                let key = Arc::clone(&key);
-                let signed = Arc::clone(&signed);
-                let records_path = records_path.clone();
-                std::thread::spawn(move || {
-                    let _ = handle_client(&key, &signed, &records_path, expected_uid, stream);
-                });
-            }
+            Ok((stream, _)) => dispatch_client(&state, stream),
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -154,27 +167,87 @@ pub fn serve(
     Ok(())
 }
 
-fn handle_client(
-    key: &SigningKey,
-    signed: &std::sync::Mutex<Vec<crate::Record>>,
-    records_path: &Path,
+struct SignerState {
+    key: Arc<SigningKey>,
+    tip: Mutex<Option<SignedTip>>,
+    tip_path: PathBuf,
+    inflight: Arc<AtomicUsize>,
     expected_uid: u32,
-    mut stream: UnixStream,
-) -> Result<(), AuditError> {
+}
+
+struct InflightPermit {
+    slots: Arc<AtomicUsize>,
+}
+
+impl Drop for InflightPermit {
+    fn drop(&mut self) {
+        self.slots.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn try_acquire(slots: &Arc<AtomicUsize>) -> Option<InflightPermit> {
+    loop {
+        let current = slots.load(Ordering::SeqCst);
+        if current >= MAX_INFLIGHT_CLIENTS {
+            return None;
+        }
+        if slots
+            .compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            return Some(InflightPermit {
+                slots: Arc::clone(slots),
+            });
+        }
+    }
+}
+
+/// Peer check and the concurrency cap run on the accept thread. A rejected
+/// or overflow connection never gets a worker.
+fn dispatch_client(state: &Arc<SignerState>, stream: UnixStream) {
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(50)));
+    match peer_uid(&stream) {
+        Ok(uid) if uid == state.expected_uid => {
+            let Some(permit) = try_acquire(&state.inflight) else {
+                let _ = write_response(&stream, &json!({"error": "signer is busy"}));
+                return;
+            };
+            let state = Arc::clone(state);
+            // A failed spawn drops the closure, which drops the permit.
+            let _ = std::thread::Builder::new()
+                .name("dj-audit-client".into())
+                .spawn(move || {
+                    let _permit = permit;
+                    let _ = handle_client(&state, stream);
+                });
+        }
+        Ok(uid) => {
+            let _ = write_response(
+                &stream,
+                &json!({"error": format!("peer uid {uid} is not the audit writer")}),
+            );
+        }
+        Err(err) => {
+            let _ = write_response(&stream, &json!({"error": err.to_string()}));
+        }
+    }
+}
+
+fn handle_client(state: &SignerState, mut stream: UnixStream) -> Result<(), AuditError> {
     let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(250)));
-    let response = match peer_uid(&stream) {
-        Ok(uid) if uid == expected_uid => match read_request(&mut stream) {
-            Ok(request) => match request.get("op").and_then(Value::as_str) {
-                Some("sign") => sign_request(key, signed, records_path, &request),
-                _ => json!({"error": "unknown signer op"}),
-            },
-            Err(err) => json!({"error": err.to_string()}),
+    let response = match read_request(&mut stream) {
+        Ok(request) => match request.get("op").and_then(Value::as_str) {
+            Some("sign") => sign_request(state, &request),
+            _ => json!({"error": "unknown signer op"}),
         },
-        Ok(uid) => json!({"error": format!("peer uid {uid} is not the audit writer")}),
         Err(err) => json!({"error": err.to_string()}),
     };
-    stream.write_all(&serde_json::to_vec(&response)?)?;
+    write_response(&stream, &response)
+}
+
+fn write_response(mut stream: &UnixStream, response: &Value) -> Result<(), AuditError> {
+    stream.write_all(&serde_json::to_vec(response)?)?;
     stream.write_all(b"\n")?;
     Ok(())
 }
@@ -203,34 +276,30 @@ fn read_request(stream: &mut UnixStream) -> Result<Value, AuditError> {
         .map_err(|err| AuditError::Corrupt(format!("signer request: {err}")))
 }
 
-fn sign_request(
-    key: &SigningKey,
-    signed: &std::sync::Mutex<Vec<crate::Record>>,
-    records_path: &Path,
-    request: &Value,
-) -> Value {
+fn sign_request(state: &SignerState, request: &Value) -> Value {
     let Some(raw) = request.get("record") else {
         return json!({"error": "signer request needs the appended record"});
     };
     let Ok(record) = serde_json::from_value::<crate::Record>(raw.clone()) else {
         return json!({"error": "signer request record is not an audit record"});
     };
-    let mut signed = match signed.lock() {
+    let mut tip = match state.tip.lock() {
         Ok(guard) => guard,
         Err(_) => return json!({"error": "signer state lock is poisoned"}),
     };
-    let decision = match authorize_record(&signed, &record) {
+    let decision = match authorize_record(tip.as_ref(), &record) {
         Ok(decision) => decision,
         Err(err) => return json!({"error": err}),
     };
     let count = record.seq + 1;
     let message = checkpoint_message(count, &record.hash);
-    let signature = key.sign(message.as_bytes());
+    let signature = state.key.sign(message.as_bytes());
     if decision == SignDecision::Extend {
-        if let Err(err) = append_signed_record(records_path, &record) {
+        let next = SignedTip::from_record(&record);
+        if let Err(err) = store_signed_tip(&state.tip_path, &next) {
             return json!({"error": err.to_string()});
         }
-        signed.push(record);
+        *tip = Some(next);
     }
     json!({"signature": hex::encode(signature.to_bytes())})
 }
@@ -242,14 +311,14 @@ enum SignDecision {
 }
 
 fn authorize_record(
-    signed: &[crate::Record],
+    tip: Option<&SignedTip>,
     record: &crate::Record,
 ) -> Result<SignDecision, String> {
     let recomputed = crate::recompute_record_hash(record);
     if recomputed != record.hash {
         return Err("record hash does not match canonical json".into());
     }
-    match signed.last() {
+    match tip {
         None => {
             if record.seq != 0 || record.prev_hash != crate::GENESIS || record.kind != "genesis" {
                 return Err("first signed record must be the genesis anchor".into());
@@ -271,12 +340,34 @@ fn authorize_record(
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct SignedTip {
+    seq: u64,
+    prev_hash: String,
+    hash: String,
+}
+
+impl SignedTip {
+    fn from_record(record: &crate::Record) -> Self {
+        Self {
+            seq: record.seq,
+            prev_hash: record.prev_hash.clone(),
+            hash: record.hash.clone(),
+        }
+    }
+}
+
 pub struct TestSigner {
     shutdown: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     pub paths: AuditPaths,
     pub key_path: PathBuf,
+    /// One signer at a time in this process, so a flood test can count workers.
+    _lock: MutexGuard<'static, ()>,
 }
+
+static TEST_SIGNER_LOCK: Mutex<()> = Mutex::new(());
+static NEXT_SIGNER: AtomicU64 = AtomicU64::new(0);
 
 pub fn spawn_test_signer() -> Result<TestSigner, AuditError> {
     spawn_test_signer_for(current_uid())
@@ -284,12 +375,46 @@ pub fn spawn_test_signer() -> Result<TestSigner, AuditError> {
 
 /// `expected_uid` is the only peer allowed to request a signature.
 pub fn spawn_test_signer_for(expected_uid: u32) -> Result<TestSigner, AuditError> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::SeqCst);
+    let n = NEXT_SIGNER.fetch_add(1, Ordering::SeqCst);
     let key_dir = std::env::temp_dir().join(format!("dj-audit-keys-{}-{n}", std::process::id()));
     fs::create_dir_all(&key_dir)?;
-    let key_path = key_dir.join("audit.ed25519");
-    let public_path = key_dir.join("audit.ed25519.pub");
+    start_test_signer(
+        key_dir.join("audit.ed25519"),
+        key_dir.join("audit.ed25519.pub"),
+        expected_uid,
+    )
+}
+
+/// Start another signer on an existing seed directory. The tip file is reloaded.
+#[cfg(test)]
+pub(crate) fn spawn_test_signer_in(
+    key_dir: &Path,
+    expected_uid: u32,
+) -> Result<TestSigner, AuditError> {
+    start_test_signer(
+        key_dir.join("audit.ed25519"),
+        key_dir.join("audit.ed25519.pub"),
+        expected_uid,
+    )
+}
+
+/// Publish the live verifying key outside the seed directory.
+#[cfg(test)]
+pub(crate) fn spawn_test_signer_with_separate_public() -> Result<TestSigner, AuditError> {
+    let n = NEXT_SIGNER.fetch_add(1, Ordering::SeqCst);
+    let key_dir = std::env::temp_dir().join(format!("dj-audit-keys-{}-{n}", std::process::id()));
+    fs::create_dir_all(&key_dir)?;
+    let public = std::env::temp_dir().join(format!("dj-audit-pub-{}-{n}.pub", std::process::id()));
+    start_test_signer(key_dir.join("audit.ed25519"), public, current_uid())
+}
+
+fn start_test_signer(
+    key_path: PathBuf,
+    public_path: PathBuf,
+    expected_uid: u32,
+) -> Result<TestSigner, AuditError> {
+    let _lock = TEST_SIGNER_LOCK.lock().expect("test signer lock");
+    let n = NEXT_SIGNER.fetch_add(1, Ordering::SeqCst);
     let socket = PathBuf::from(format!("/tmp/djaudit-{}-{n}.sock", std::process::id()));
     if socket.exists() {
         let _ = fs::remove_file(&socket);
@@ -318,6 +443,7 @@ pub fn spawn_test_signer_for(expected_uid: u32) -> Result<TestSigner, AuditError
         thread: Some(thread),
         paths,
         key_path,
+        _lock,
     })
 }
 
@@ -401,47 +527,55 @@ pub fn load_verifying_key(path: &Path) -> Result<VerifyingKey, AuditError> {
         .map_err(|err| AuditError::Corrupt(format!("verifying key is invalid: {err}")))
 }
 
-fn load_signed_records(path: &Path) -> Result<Vec<crate::Record>, AuditError> {
-    if !path.exists() {
-        return Ok(Vec::new());
+fn load_signed_tip(path: &Path) -> Result<Option<SignedTip>, AuditError> {
+    if path.exists() {
+        let text = fs::read_to_string(path)?;
+        let tip: SignedTip = serde_json::from_str(text.trim())?;
+        return check_tip(tip).map(Some);
     }
-    let text = fs::read_to_string(path)?;
-    let mut records = Vec::new();
-    for (idx, line) in text.lines().enumerate() {
-        if line.is_empty() {
-            continue;
-        }
-        let record: crate::Record = serde_json::from_str(line)?;
-        let recomputed = crate::recompute_record_hash(&record);
-        if recomputed != record.hash {
-            return Err(AuditError::Corrupt(format!(
-                "signer copy hash mismatch at line {}",
-                idx + 1
-            )));
-        }
-        if let Some(prev) = records.last() {
-            let prev: &crate::Record = prev;
-            if record.seq != prev.seq + 1 || record.prev_hash != prev.hash {
-                return Err(AuditError::Corrupt("signer copy does not chain".into()));
-            }
-        }
-        records.push(record);
+    let legacy = path.with_file_name(LEGACY_RECORDS);
+    if !legacy.exists() {
+        return Ok(None);
     }
-    Ok(records)
+    let text = fs::read_to_string(&legacy)?;
+    let Some(line) = text.lines().rev().find(|line| !line.is_empty()) else {
+        let _ = fs::remove_file(&legacy);
+        return Ok(None);
+    };
+    let record: crate::Record = serde_json::from_str(line)?;
+    if crate::recompute_record_hash(&record) != record.hash {
+        return Err(AuditError::Corrupt(
+            "legacy signer copy hash mismatch".into(),
+        ));
+    }
+    let tip = SignedTip::from_record(&record);
+    store_signed_tip(path, &tip)?;
+    let _ = fs::remove_file(&legacy);
+    Ok(Some(tip))
 }
 
-fn append_signed_record(path: &Path, record: &crate::Record) -> Result<(), AuditError> {
+fn check_tip(tip: SignedTip) -> Result<SignedTip, AuditError> {
+    if tip.hash.len() != 64 || tip.prev_hash.len() != 64 {
+        return Err(AuditError::Corrupt(
+            "signed tip hash is not 64 hex characters".into(),
+        ));
+    }
+    Ok(tip)
+}
+
+fn store_signed_tip(path: &Path, tip: &SignedTip) -> Result<(), AuditError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    file.write_all(serde_json::to_string(record)?.as_bytes())?;
-    file.write_all(b"\n")?;
-    file.sync_all()?;
+    let tmp = path.with_extension("json.tmp");
+    {
+        let mut file = File::create(&tmp)?;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.write_all(&serde_json::to_vec(tip)?)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+    }
+    fs::rename(&tmp, path)?;
     Ok(())
 }
 

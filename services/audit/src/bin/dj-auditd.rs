@@ -34,7 +34,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--help" | "-h" => {
                 println!(
                     "dj-auditd [--key PATH] [--public PATH] [--socket PATH]\n\
-                     defaults: {DEFAULT_SIGNING_KEY} {DEFAULT_VERIFYING_KEY} {DEFAULT_SIGNER_SOCKET}"
+                     defaults: {DEFAULT_SIGNING_KEY} {DEFAULT_VERIFYING_KEY} {DEFAULT_SIGNER_SOCKET}\n\
+                     the verifying key is also written next to the seed as audit.ed25519.pub"
                 );
                 return Ok(());
             }
