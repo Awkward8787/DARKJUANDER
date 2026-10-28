@@ -87,7 +87,8 @@ fn real_main() -> Result<ExitCode, String> {
                     &manifest,
                     &std::env::current_exe().map_err(|err| err.to_string())?,
                     &command,
-                );
+                )
+                .map_err(|err| err.to_string())?;
                 println!("bwrap {}", plan.args.join(" "));
                 println!(
                     "cgroup intent: {} memory.max={} pids.max={} (applied only if the host cgroup fs accepts the write)",

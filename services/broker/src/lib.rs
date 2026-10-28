@@ -4,16 +4,31 @@
 //! prompts fail closed in this slice: there is no trusted desktop dialog yet,
 //! so an `approve` decision is recorded and then denied.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 use dj_audit::{AuditLog, Event};
 use dj_label::{Confidentiality, Integrity, Labels};
 use dj_policy::{ActionClass, DecisionKind, Policy, PolicyRequest, RouteKind};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::ffi::CString;
+use std::fs::{self, File};
+use std::io::Read;
+use std::os::fd::FromRawFd;
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
+
+const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+const RESOLVE_NO_SYMLINKS: u64 = 0x04;
+const RESOLVE_BENEATH: u64 = 0x08;
+
+#[repr(C)]
+struct OpenHow {
+    flags: u64,
+    mode: u64,
+    resolve: u64,
+}
 
 #[derive(Clone, Debug)]
 pub struct Principal {
@@ -206,36 +221,47 @@ pub struct MediatedFile {
     pub path: PathBuf,
 }
 
-/// Read a file the broker has already authorized.
+/// Read a file through one `openat2` under the grant root.
 ///
-/// The path is canonicalized and must stay under the matching grant.
-/// Paths under `private_roots` are labeled private. Paths under `secret_roots`
-/// are labeled secret. The caller does not choose those labels.
+/// `RESOLVE_BENEATH` and `RESOLVE_NO_SYMLINKS` are applied to that open. The
+/// label comes from the fd's path, not from a second lookup of the caller's
+/// path. A symlink swap between a check and a later open cannot retarget the
+/// read, because there is no second open.
 pub fn read_mediated_file(
     principal: &Principal,
     requested: &Path,
     private_roots: &[PathBuf],
     secret_roots: &[PathBuf],
 ) -> Result<MediatedFile, BrokerError> {
-    let canonical = fs::canonicalize(requested).map_err(|err| {
-        BrokerError::File(format!("cannot resolve {}: {err}", requested.display()))
+    let requested = lexical_absolute(requested)?;
+    let root = grant_root(principal, &requested)?;
+    let relative = requested.strip_prefix(&root).map_err(|_| {
+        BrokerError::File(format!(
+            "resolved path {} is outside the grant",
+            requested.display()
+        ))
     })?;
-    let grant = principal
-        .file_grant("files.read", &canonical)
-        .ok_or_else(|| {
-            BrokerError::File(format!(
-                "resolved path {} is outside the grant",
-                canonical.display()
-            ))
-        })?;
-    let _ = grant;
-    let text = fs::read_to_string(&canonical).map_err(|err| BrokerError::File(err.to_string()))?;
+    if relative.as_os_str().is_empty() {
+        return Err(BrokerError::File(
+            "refusing to read the grant root itself".into(),
+        ));
+    }
+    let (mut file, located, root_located) = open_beneath(&root, relative)?;
+    if !located.starts_with(&root_located) {
+        return Err(BrokerError::File(format!(
+            "opened fd {} is outside the grant",
+            located.display()
+        )));
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .map_err(|err| BrokerError::File(err.to_string()))?;
     if text.len() > 1024 * 1024 {
         return Err(BrokerError::File("file is larger than 1 MiB".into()));
     }
-    let confidentiality = if under_any(&canonical, secret_roots) {
+    let confidentiality = if under_any(&located, secret_roots) {
         Confidentiality::Secret
-    } else if under_any(&canonical, private_roots) {
+    } else if under_any(&located, private_roots) {
         Confidentiality::Private
     } else {
         Confidentiality::Public
@@ -245,11 +271,127 @@ pub fn read_mediated_file(
         labels: Labels {
             integrity: Integrity::Trusted,
             confidentiality,
-            origin: format!("file:{}", canonical.display()),
+            origin: format!("file:{}", located.display()),
             owner: principal.id.clone(),
         },
-        path: canonical,
+        path: located,
     })
+}
+
+fn lexical_absolute(path: &Path) -> Result<PathBuf, BrokerError> {
+    if !path.is_absolute() {
+        return Err(BrokerError::File(format!(
+            "{} is not absolute",
+            path.display()
+        )));
+    }
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::RootDir => out.push("/"),
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::Prefix(_) => {
+                return Err(BrokerError::File(format!(
+                    "refusing path {}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn grant_root(principal: &Principal, requested: &Path) -> Result<PathBuf, BrokerError> {
+    let mut best: Option<PathBuf> = None;
+    for grant in &principal.grants {
+        let Some(root) = grant.strip_prefix("files.read:") else {
+            continue;
+        };
+        if root.is_empty() {
+            continue;
+        }
+        let root = lexical_absolute(Path::new(root.trim_end_matches('/')))?;
+        if requested == root || requested.starts_with(&root) {
+            let replace = best
+                .as_ref()
+                .map(|current| root.components().count() > current.components().count())
+                .unwrap_or(true);
+            if replace {
+                best = Some(root);
+            }
+        }
+    }
+    best.ok_or_else(|| {
+        BrokerError::File(format!(
+            "resolved path {} is outside the grant",
+            requested.display()
+        ))
+    })
+}
+
+#[allow(unsafe_code)]
+fn open_beneath(root: &Path, relative: &Path) -> Result<(File, PathBuf, PathBuf), BrokerError> {
+    use std::os::fd::AsRawFd;
+    let root_c = c_string(root)?;
+    let dirfd = unsafe {
+        libc::open(
+            root_c.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if dirfd < 0 {
+        return Err(BrokerError::File(format!(
+            "cannot open grant root {}: {}",
+            root.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    let dir = unsafe { File::from_raw_fd(dirfd) };
+    let root_located = readlink_fd(dir.as_raw_fd())?;
+    let rel_c = c_string(relative)?;
+    let mut how = OpenHow {
+        flags: (libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW) as u64,
+        mode: 0,
+        resolve: RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS,
+    };
+    let opened = unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            dir.as_raw_fd(),
+            rel_c.as_ptr(),
+            &mut how as *mut OpenHow,
+            std::mem::size_of::<OpenHow>(),
+        )
+    };
+    if opened < 0 {
+        return Err(BrokerError::File(format!(
+            "openat2 {}: {}",
+            relative.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    let file_fd = opened as i32;
+    let located = match readlink_fd(file_fd) {
+        Ok(path) => path,
+        Err(err) => {
+            unsafe { libc::close(file_fd) };
+            return Err(err);
+        }
+    };
+    let file = unsafe { File::from_raw_fd(file_fd) };
+    Ok((file, located, root_located))
+}
+
+fn readlink_fd(fd: i32) -> Result<PathBuf, BrokerError> {
+    let link = fs::read_link(format!("/proc/self/fd/{fd}"))
+        .map_err(|err| BrokerError::File(format!("cannot locate opened fd: {err}")))?;
+    Ok(link)
+}
+
+fn c_string(path: &Path) -> Result<CString, BrokerError> {
+    CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| BrokerError::File(format!("path {} contains a nul", path.display())))
 }
 
 fn under_any(path: &Path, roots: &[PathBuf]) -> bool {
@@ -265,6 +407,7 @@ fn under_any(path: &Path, roots: &[PathBuf]) -> bool {
 mod tests {
     use super::*;
     use dj_label::Integrity;
+    use std::ffi::CString;
 
     fn principal() -> Principal {
         Principal {
@@ -334,5 +477,70 @@ mod tests {
 
         let err = read_mediated_file(&who, &outside, &[private_dir], &[]).unwrap_err();
         assert!(err.to_string().contains("outside the grant"));
+    }
+
+    #[test]
+    fn symlink_inside_the_grant_is_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let grant = dir.path().join("grant");
+        fs::create_dir_all(&grant).unwrap();
+        let secret = dir.path().join("secret.txt");
+        fs::write(&secret, "SECRET_BYTES").unwrap();
+        std::os::unix::fs::symlink(&secret, grant.join("alias.txt")).unwrap();
+        let mut who = principal();
+        who.grants = BTreeSet::from([format!("files.read:{}", grant.display())]);
+        let err = read_mediated_file(&who, &grant.join("alias.txt"), &[], &[]).unwrap_err();
+        assert!(!err.to_string().contains("SECRET_BYTES"), "{err}");
+    }
+
+    #[test]
+    #[allow(unsafe_code)]
+    fn rename_exchange_cannot_retarget_a_mediated_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let grant = dir.path().join("grant");
+        fs::create_dir_all(&grant).unwrap();
+        let victim = grant.join("victim.txt");
+        fs::write(&victim, "PUBLIC_OK").unwrap();
+        let secret = dir.path().join("secret.txt");
+        fs::write(&secret, "SECRET_BYTES").unwrap();
+        let swap = dir.path().join("swap");
+        std::os::unix::fs::symlink(&secret, &swap).unwrap();
+
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_thread = stop.clone();
+        let victim_thread = victim.clone();
+        let swap_thread = swap.clone();
+        let exchanger = std::thread::spawn(move || {
+            let old = CString::new(victim_thread.as_os_str().as_bytes()).unwrap();
+            let new = CString::new(swap_thread.as_os_str().as_bytes()).unwrap();
+            while !stop_thread.load(std::sync::atomic::Ordering::Relaxed) {
+                unsafe {
+                    libc::renameat2(
+                        libc::AT_FDCWD,
+                        old.as_ptr(),
+                        libc::AT_FDCWD,
+                        new.as_ptr(),
+                        libc::RENAME_EXCHANGE,
+                    );
+                }
+            }
+        });
+
+        let mut who = principal();
+        who.grants = BTreeSet::from([format!("files.read:{}", grant.display())]);
+        for _ in 0..200 {
+            match read_mediated_file(&who, &victim, &[], &[]) {
+                Ok(mediated) => {
+                    assert_ne!(mediated.text, "SECRET_BYTES");
+                    assert_eq!(mediated.labels.confidentiality, Confidentiality::Public);
+                    assert_eq!(mediated.text, "PUBLIC_OK");
+                }
+                Err(err) => {
+                    assert!(!err.to_string().contains("SECRET_BYTES"), "{err}");
+                }
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        exchanger.join().unwrap();
     }
 }

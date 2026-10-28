@@ -2,6 +2,8 @@
 //!
 //! `bubblewrap` provides the namespaces. This crate builds that command, then
 //! a confine step applies Landlock and a seccomp denylist before `exec`.
+//! The denylist is not an allowlist. Moving agents to an allowlist is tracked
+//! as SB-2 in `docs/ROADMAP.md`.
 //! If `bwrap` is missing, [`run`] refuses to start the command. It does not
 //! fall back to an unsandboxed process.
 //!
@@ -99,7 +101,98 @@ pub struct SandboxPlan {
     pub slice: String,
 }
 
-pub fn plan(manifest: &Manifest, exe: &Path, command: &[String]) -> SandboxPlan {
+pub const AGENT_ROOT: &str = "/var/lib/darkjuander/agents";
+
+/// The workspace must be exactly `{AGENT_ROOT}/{name}`. `/`, system prefixes,
+/// `..`, and symlinks are refused. `plan` and `run` both call this.
+pub fn validate_workspace(manifest: &Manifest) -> Result<PathBuf, SandboxError> {
+    validate_workspace_under(Path::new(AGENT_ROOT), manifest)
+}
+
+pub fn validate_workspace_under(root: &Path, manifest: &Manifest) -> Result<PathBuf, SandboxError> {
+    if !agent_name_ok(&manifest.name) {
+        return Err(SandboxError::Message(format!(
+            "refusing agent name {}",
+            manifest.name
+        )));
+    }
+    let expected = lexical_normal(&root.join(&manifest.name))?;
+    let given = lexical_normal(&manifest.workspace)?;
+    if given != expected {
+        return Err(SandboxError::Message(format!(
+            "refusing workspace {}: an agent is pinned to {}",
+            manifest.workspace.display(),
+            expected.display()
+        )));
+    }
+    refuse_symlinks(&expected)?;
+    Ok(expected)
+}
+
+fn agent_name_ok(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphanumeric() {
+        return false;
+    }
+    name.len() <= 64
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '.' || ch == '_' || ch == '-')
+        && name != "."
+        && name != ".."
+}
+
+fn lexical_normal(path: &Path) -> Result<PathBuf, SandboxError> {
+    if !path.is_absolute() {
+        return Err(SandboxError::Message(format!(
+            "workspace {} is not absolute",
+            path.display()
+        )));
+    }
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir => out.push("/"),
+            std::path::Component::Normal(part) => out.push(part),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(SandboxError::Message(format!(
+                    "refusing workspace {}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn refuse_symlinks(path: &Path) -> Result<(), SandboxError> {
+    let mut walked = PathBuf::new();
+    for component in path.components() {
+        walked.push(component);
+        if !walked.exists() {
+            continue;
+        }
+        let meta = fs::symlink_metadata(&walked)?;
+        if meta.file_type().is_symlink() {
+            return Err(SandboxError::Message(format!(
+                "refusing symlink at {}",
+                walked.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn plan(
+    manifest: &Manifest,
+    exe: &Path,
+    command: &[String],
+) -> Result<SandboxPlan, SandboxError> {
+    let workspace = validate_workspace(manifest)?;
     let mut args = vec![
         "--unshare-user".into(),
         "--unshare-pid".into(),
@@ -127,7 +220,7 @@ pub fn plan(manifest: &Manifest, exe: &Path, command: &[String]) -> SandboxPlan 
             args.push(path.into());
         }
     }
-    let workspace = manifest.workspace.display().to_string();
+    let workspace = workspace.display().to_string();
     args.extend([
         "--bind".into(),
         workspace.clone(),
@@ -157,7 +250,7 @@ pub fn plan(manifest: &Manifest, exe: &Path, command: &[String]) -> SandboxPlan 
     args.push("sandbox".into());
     args.push("confine".into());
     args.push("--workspace".into());
-    args.push(workspace);
+    args.push(workspace.clone());
     for path in ["/usr", "/lib", "/lib64", "/bin"] {
         if Path::new(path).is_dir() {
             args.push("--ro".into());
@@ -165,17 +258,17 @@ pub fn plan(manifest: &Manifest, exe: &Path, command: &[String]) -> SandboxPlan 
         }
     }
     args.push("--rw".into());
-    args.push(manifest.workspace.display().to_string());
+    args.push(workspace.clone());
     args.push("--rw".into());
     args.push("/tmp".into());
     args.push("--".into());
     args.extend(command.iter().cloned());
-    SandboxPlan {
+    Ok(SandboxPlan {
         args,
         memory_max: manifest.memory_max.clone(),
         pids_max: manifest.pids_max,
         slice: format!("dj-agent.slice/dj-agents-{}.scope", manifest.name),
-    }
+    })
 }
 
 pub fn which(name: &str) -> Option<PathBuf> {
@@ -207,10 +300,11 @@ pub fn run(manifest: &Manifest, command: &[String]) -> Result<ExitStatus, Sandbo
             "bwrap is not installed; refusing to run the agent without a sandbox".into(),
         )
     })?;
-    fs::create_dir_all(&manifest.workspace)?;
+    let workspace = validate_workspace(manifest)?;
+    fs::create_dir_all(&workspace)?;
     let _cgroup_applied = try_apply_cgroup(manifest);
     let exe = std::env::current_exe()?;
-    let plan = plan(manifest, &exe, command);
+    let plan = plan(manifest, &exe, command)?;
     let status = Command::new(bwrap).args(&plan.args).status()?;
     Ok(status)
 }
@@ -401,7 +495,7 @@ mod tests {
             version: "0.1.0".into(),
             publisher: "darkjuander.local".into(),
             trust_domain: "research".into(),
-            workspace: tmp.join("work"),
+            workspace: PathBuf::from("/var/lib/darkjuander/agents/research"),
             capabilities: vec!["model.use:default-chat".into()],
             api_socket: Some(tmp.join("umbrad.sock")),
             memory_max: "512M".into(),
@@ -416,7 +510,8 @@ mod tests {
             &manifest(tmp.path()),
             Path::new("/usr/bin/dj"),
             &["/bin/true".into()],
-        );
+        )
+        .unwrap();
         let text = plan.args.join(" ");
         assert!(text.contains("--unshare-net"));
         assert!(text.contains("--unshare-user"));
@@ -439,6 +534,37 @@ mod tests {
         )
         .unwrap();
         assert!(Manifest::from_path(&path).is_err());
+    }
+
+    #[test]
+    fn root_workspace_is_rejected() {
+        let mut manifest = manifest(Path::new("/tmp"));
+        manifest.workspace = PathBuf::from("/");
+        let err = plan(&manifest, Path::new("/usr/bin/dj"), &["/bin/true".into()]).unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("refusing workspace"), "{text}");
+        assert!(!text.contains("--bind / /"));
+    }
+
+    #[test]
+    fn symlink_agent_root_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("agents");
+        fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink("/", root.join("evil")).unwrap();
+        let manifest = Manifest {
+            name: "evil".into(),
+            version: "0.1.0".into(),
+            publisher: "darkjuander.local".into(),
+            trust_domain: "evil".into(),
+            workspace: root.join("evil"),
+            capabilities: vec!["model.use:default-chat".into()],
+            api_socket: None,
+            memory_max: "1G".into(),
+            pids_max: 8,
+        };
+        let err = validate_workspace_under(&root, &manifest).unwrap_err();
+        assert!(err.to_string().contains("symlink"), "{err}");
     }
 
     #[test]

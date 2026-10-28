@@ -10,6 +10,7 @@ use dj_policy::RouteKind;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::path::Path;
 use umbra::{decide, RouteInput};
 
@@ -89,6 +90,9 @@ pub struct PsiBody {
     clear: bool,
 }
 
+/// Test hook. The image config leaves `allow_psi_override` false, and it must
+/// stay false on any machine that treats routing as a boundary. Enabling it
+/// lets `admin.control` invent pressure and steer model choice.
 pub async fn psi_override(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -202,6 +206,7 @@ pub async fn chat(
 
     let psi = state.psi();
     let local_only = state.config().local_only || caller.local_only;
+    let granted = granted_models(&caller);
     let decision = decide(&RouteInput {
         requested: &request.model,
         models: state.models(),
@@ -212,8 +217,15 @@ pub async fn chat(
         prefer_cloud: state.config().prefer_cloud,
         local_only,
         policy: state.policy(),
+        granted: Some(&granted),
     })
     .map_err(|err| ApiError::new(StatusCode::FORBIDDEN, err.to_string()))?;
+    if !caller.has_grant(&format!("model.use:{}", decision.selected)) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            format!("capability not granted for model.use:{}", decision.selected),
+        ));
+    }
 
     state
         .registry()
@@ -368,19 +380,16 @@ pub async fn tool(
     Json(body): Json<ToolBody>,
 ) -> Result<Json<Value>, ApiError> {
     let caller = authenticate(&state, &headers)?;
-    let mut labels = body
+    let floor = state
+        .last_labels(&caller.id)
+        .unwrap_or_else(|| Labels::user(&caller.id));
+    let claimed = body
         .labels
+        .clone()
         .unwrap_or_else(|| Labels::user(&caller.id))
-        .ingest()
-        .pin_owner(&caller.id);
-    if let Some(previous) = state.last_labels(&caller.id) {
-        labels = labels.join(&previous).pin_owner(&caller.id);
-    }
-    let route = if body.action == "model.use" && body.target.contains("cloud") {
-        Some(RouteKind::Cloud)
-    } else {
-        None
-    };
+        .ingest();
+    let labels = floor.with_claim(&claimed).ingest().pin_owner(&caller.id);
+    let route = model_route(&state, &body.action, &body.target);
     let authz = state
         .broker()
         .authorize(
@@ -416,6 +425,11 @@ pub async fn tool(
         mediated.text.clone(),
         mediated.labels.clone(),
     );
+    let raised = floor.with_claim(&mediated.labels).pin_owner(&caller.id);
+    state.remember_labels(&caller.id, raised);
+    // The bytes stay in the span. Returning them would let the caller resubmit
+    // the same text under a public label. Copying through a side channel that
+    // never calls this broker is still not detected; that needs PE-6/PE-7.
     Ok(Json(json!({
         "decision": "allow",
         "performed": true,
@@ -424,9 +438,31 @@ pub async fn tool(
         "reason": authz.reason,
         "labels": mediated.labels,
         "span_id": span.id,
-        "text": mediated.text,
         "path": mediated.path,
     })))
+}
+
+fn granted_models(caller: &dj_broker::Principal) -> BTreeSet<String> {
+    caller
+        .grants
+        .iter()
+        .filter_map(|grant| grant.strip_prefix("model.use:"))
+        .filter(|id| !id.is_empty())
+        .map(|id| id.to_string())
+        .collect()
+}
+
+fn model_route(state: &AppState, action: &str, target: &str) -> Option<RouteKind> {
+    if action != "model.use" {
+        return None;
+    }
+    state
+        .models()
+        .get(target)
+        .map(|model| match model.location {
+            umbra::Location::Local => RouteKind::Local,
+            umbra::Location::Cloud => RouteKind::Cloud,
+        })
 }
 
 fn resolve_message(
@@ -434,12 +470,15 @@ fn resolve_message(
     caller: &dj_broker::Principal,
     message: &IncomingMessage,
 ) -> Result<ResolvedMessage, ApiError> {
-    let mut labels = message
+    let floor = state
+        .last_labels(&caller.id)
+        .unwrap_or_else(|| Labels::user(&caller.id));
+    let claimed = message
         .dj_labels
         .clone()
         .unwrap_or_else(|| Labels::user(&caller.id))
-        .ingest()
-        .pin_owner(&caller.id);
+        .ingest();
+    let mut labels = floor.with_claim(&claimed).ingest().pin_owner(&caller.id);
     let mut content = message.content.clone();
     if let Some(span_id) = &message.dj_span {
         let span = state.span(span_id).ok_or_else(|| {

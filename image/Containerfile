@@ -1,9 +1,8 @@
 # dj-base
-# Fedora bootc 45, the current stable tag on 2026-10-28 (aarch64 and x86_64).
-# bootc supplies the read-only root and A/B updates when this image is installed
-# to a disk. The container build itself is not a running system, and this file
-# has not been built or booted in CI.
-FROM quay.io/fedora/fedora-bootc:45
+# Fedora bootc 45 index digest resolved on 2026-10-28. The tag is kept so the
+# line stays readable; the digest is what the build uses. This image has not
+# been built or booted in CI, and it is not signed.
+FROM quay.io/fedora/fedora-bootc:45@sha256:ed6ebf922c4c63704b1ff7befff74c8d06a5fb74a37b817df3d2cd093568bbc5
 
 ARG DJ_VERSION=0.1.0
 

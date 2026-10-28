@@ -64,6 +64,7 @@ fn run_in(dir: &Path) -> Result<String, String> {
     scene_injection(&socket, &audit_path, &mut report)?;
     scene_pressure(&socket, &mut report)?;
     scene_private(&socket, &private_dir, &audit_path, &mut report)?;
+    scene_alias_grant(&socket, &mut report)?;
 
     let verified = dj_audit::verify_file(&audit_path).map_err(|err| err.to_string())?;
     let line = format!(
@@ -299,20 +300,30 @@ fn scene_private(
             read["labels"]["confidentiality"]
         ));
     }
-    let span = read["span_id"].as_str().ok_or("missing span")?.to_string();
+    if read.get("text").is_some() {
+        return Err("files.read returned plaintext".into());
+    }
+    let rendered = serde_json::to_string(&read).unwrap_or_default();
+    if rendered.contains(CANARY) {
+        return Err("files.read response contained the private bytes".into());
+    }
+    if read["span_id"].as_str().is_none() {
+        return Err("files.read did not return a span handle".into());
+    }
+    // The agent ignores the span and resubmits the bytes with a public label.
     let completion = chat(
         socket,
         "dev-token-agent-a",
         "default-chat",
         vec![user_msg(
-            "Summarize the attached file.",
+            CANARY,
             Some(json!({
                 "integrity": "trusted",
                 "confidentiality": "public",
                 "origin": "user",
                 "owner": "agent-a"
             })),
-            Some(span),
+            None,
         )],
     )?;
     if completion["dj"]["route"]["scorer_preferred"] != "cloud-remote" {
@@ -331,13 +342,7 @@ fn scene_private(
         return Err("output lost the private label".into());
     }
     let top = get(socket, "dev-token-admin", "/v1/dj/top")?;
-    let cloud_calls = top["engines"]
-        .as_array()
-        .ok_or("engines")?
-        .iter()
-        .find(|engine| engine["name"] == "mock-cloud")
-        .and_then(|engine| engine["calls"].as_u64())
-        .unwrap_or(0);
+    let cloud_calls = cloud_calls(&top)?;
     if cloud_calls != 0 {
         return Err(format!("cloud engine was called {cloud_calls} times"));
     }
@@ -348,9 +353,51 @@ fn scene_private(
     let reason = completion["dj"]["route"]["reason"].as_str().unwrap_or("");
     let selected = completion["model"].as_str().unwrap_or("?");
     report.push_str(&format!(
-        "  scorer preferred cloud-remote; routed {selected}\n  cloud engine calls=0\n  reason: {reason}\n  PASS\n\n"
+        "  files.read returned a span, not the bytes\n  resubmitted body with public labels stayed on {selected}\n  cloud engine calls=0\n  reason: {reason}\n  PASS\n\n"
     ));
     Ok(())
+}
+
+fn scene_alias_grant(socket: &Path, report: &mut String) -> Result<(), String> {
+    report.push_str("regression: an alias grant does not authorize the resolved cloud model\n");
+    let denied = chat(
+        socket,
+        "dev-token-alias",
+        "default-chat",
+        vec![user_msg("hello", None, None)],
+    );
+    let Err(err) = denied else {
+        return Err("alias-only grant was allowed to run a model".into());
+    };
+    if !err.contains("model.use") && !err.contains("no route") {
+        return Err(format!("unexpected alias denial: {err}"));
+    }
+    let local = chat(
+        socket,
+        "dev-token-local",
+        "default-chat",
+        vec![user_msg("hello", None, None)],
+    )?;
+    if local["model"] == "cloud-remote" {
+        return Err("ungranted cloud model was selected".into());
+    }
+    let top = get(socket, "dev-token-admin", "/v1/dj/top")?;
+    let cloud_calls = cloud_calls(&top)?;
+    if cloud_calls != 0 {
+        return Err(format!("cloud engine calls={cloud_calls}"));
+    }
+    report.push_str("  alias-only grant denied; local grants stayed off cloud-remote\n  PASS\n\n");
+    Ok(())
+}
+
+fn cloud_calls(top: &Value) -> Result<u64, String> {
+    top["engines"]
+        .as_array()
+        .ok_or("engines")?
+        .iter()
+        .find(|engine| engine["name"] == "mock-cloud")
+        .and_then(|engine| engine["calls"].as_u64())
+        .ok_or_else(|| "mock-cloud missing".into())
 }
 
 fn demo_config(dir: &Path, socket: &Path, private_dir: &Path) -> FileConfig {
@@ -402,6 +449,7 @@ principals:
       - "model.use:default-chat"
       - "model.use:mid-local"
       - "model.use:small-local"
+      - "model.use:cloud-remote"
       - "email.send"
       - "files.read:{private}"
   - id: agent-b
@@ -416,6 +464,20 @@ principals:
     local_only: true
     grants:
       - "model.use:default-chat"
+      - "model.use:mid-local"
+      - "model.use:small-local"
+  - id: agent-alias
+    token: dev-token-alias
+    trust_domain: domain-alias
+    grants:
+      - "model.use:default-chat"
+  - id: agent-local
+    token: dev-token-local
+    trust_domain: domain-local
+    grants:
+      - "model.use:default-chat"
+      - "model.use:mid-local"
+      - "model.use:small-local"
   - id: admin
     token: dev-token-admin
     trust_domain: admin

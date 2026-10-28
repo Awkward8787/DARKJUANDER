@@ -15,6 +15,13 @@ date: "Draft v0.2, October 27, 2026"
 | Date | October 27, 2026 |
 | Base | Hardened, image-based Linux. No new kernel. |
 
+> **Repository status.** This file is the requirements draft. The code in this
+> repository does not implement it. The five demo scenes check specific
+> userspace behaviors against a mock engine. They do not prove that a
+> compromised agent cannot copy bytes through a side channel, that the disk
+> image enforces this threat model, or that any Section 7.9 number has been
+> measured. See the README section "What the demos do not prove".
+
 ## 1. Summary and vision
 
 DARKJUANDER is a Linux-based desktop and workstation operating system built for running AI models and AI agents safely. AI is part of the operating system's infrastructure, but no single model or vendor is baked in. The user picks which models run, local or cloud, and can swap them at any time without changing the apps that use them.

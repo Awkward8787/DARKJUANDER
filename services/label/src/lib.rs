@@ -95,16 +95,29 @@ impl Labels {
         iter.fold(first.clone(), |acc, next| acc.join(next))
     }
 
+    /// `claimed` may only make the result more restrictive than `self`.
+    ///
+    /// Join is that operation: untrusted stays untrusted, and secret stays
+    /// secret. A caller cannot use this to lower a floor the broker already set.
+    pub fn with_claim(&self, claimed: &Self) -> Self {
+        self.join(claimed)
+    }
+
     /// Web and email origins cannot be marked trusted by the caller.
     ///
-    /// The origin string itself is still caller-asserted until a broker fetch
-    /// exists. A caller who lies about the origin is outside this check.
+    /// Each origin token is checked, so a join that sorts `user` before `web:`
+    /// still forces untrusted. The origin string is still caller-asserted until
+    /// a broker fetch exists. Confidentiality is not inferred from the bytes.
+    /// Copying private text through a channel that never touched the broker is
+    /// outside this check until content inspection (PE-6, PE-7) exists.
     pub fn ingest(mut self) -> Self {
-        let origin = self.origin.to_ascii_lowercase();
-        let forced = origin.starts_with("web:")
-            || origin.starts_with("email:")
-            || origin.starts_with("http:")
-            || origin.starts_with("https:");
+        let forced = self.origin.split(" + ").any(|part| {
+            let part = part.trim().to_ascii_lowercase();
+            part.starts_with("web:")
+                || part.starts_with("email:")
+                || part.starts_with("http:")
+                || part.starts_with("https:")
+        });
         if forced {
             self.integrity = Integrity::Untrusted;
         }
@@ -195,6 +208,25 @@ mod tests {
         assert_eq!(joined.confidentiality, Confidentiality::Secret);
         assert_eq!(joined, untrusted.join(&trusted));
         assert_eq!(joined.join(&joined), joined);
+    }
+
+    #[test]
+    fn claim_can_raise_and_cannot_lower() {
+        let floor = Labels {
+            integrity: Integrity::Untrusted,
+            confidentiality: Confidentiality::Private,
+            origin: "file:/var/lib/darkjuander/private/notes.txt".into(),
+            owner: "agent-a".into(),
+        };
+        let claimed = Labels {
+            integrity: Integrity::Trusted,
+            confidentiality: Confidentiality::Public,
+            origin: "user".into(),
+            owner: "agent-a".into(),
+        };
+        let joined = floor.with_claim(&claimed);
+        assert_eq!(joined.integrity, Integrity::Untrusted);
+        assert_eq!(joined.confidentiality, Confidentiality::Private);
     }
 
     #[test]

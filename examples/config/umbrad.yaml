@@ -1,6 +1,8 @@
 # Image default. Local only. The mock engine is what answers until you point
 # an engine at llama-server. The token below is a local placeholder. The socket
 # is mode 0600 and owned by dj-umbra. Replace the token before you widen access.
+# allow_psi_override must stay false here. It is a test hook that lets an
+# admin principal invent memory pressure and steer routing.
 socket: /run/darkjuander/umbrad.sock
 audit_path: /var/lib/darkjuander/audit.log
 policy_path: /usr/share/darkjuander/policy/default.yaml

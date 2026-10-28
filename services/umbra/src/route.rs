@@ -9,7 +9,7 @@ use crate::psi::PsiSnapshot;
 use dj_label::Labels;
 use dj_policy::{ActionClass, DecisionKind, Policy, PolicyRequest, RouteKind};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 use thiserror::Error;
 
@@ -93,6 +93,9 @@ pub struct RouteInput<'a> {
     pub prefer_cloud: bool,
     pub local_only: bool,
     pub policy: &'a Policy,
+    /// Concrete model ids this caller may run. `None` skips the grant filter,
+    /// which the daemon does not do. The gateway always passes `Some`.
+    pub granted: Option<&'a BTreeSet<String>>,
 }
 
 pub fn decide(input: &RouteInput<'_>) -> Result<RouteDecision, RouteError> {
@@ -186,6 +189,15 @@ fn candidate_ids(input: &RouteInput<'_>) -> Result<Vec<String>, RouteError> {
 }
 
 fn hard_block(input: &RouteInput<'_>, spec: &ModelSpec) -> Option<RemovedRoute> {
+    if let Some(granted) = input.granted {
+        if !granted.contains(&spec.id) {
+            return Some(RemovedRoute {
+                model: spec.id.clone(),
+                rule_id: "model-grant".into(),
+                reason: format!("caller lacks model.use:{}", spec.id),
+            });
+        }
+    }
     if input.local_only && spec.location == Location::Cloud {
         return Some(RemovedRoute {
             model: spec.id.clone(),
@@ -308,7 +320,27 @@ mod tests {
             prefer_cloud: true,
             local_only,
             policy,
+            granted: None,
         }
+    }
+
+    #[test]
+    fn alias_grant_does_not_keep_an_ungranted_cloud_model() {
+        let (models, aliases) = catalog();
+        let policy = Policy::bundled();
+        let labels = Labels::user("agent");
+        let psi = PsiSnapshot::idle();
+        let mut granted = BTreeSet::new();
+        granted.insert("mid-local".into());
+        granted.insert("small-local".into());
+        let mut input = input(&models, &aliases, &policy, &labels, &psi, false);
+        input.granted = Some(&granted);
+        let decision = decide(&input).unwrap();
+        assert_eq!(decision.selected, "mid-local");
+        assert!(decision
+            .removed
+            .iter()
+            .any(|item| item.model == "cloud-remote" && item.rule_id == "model-grant"));
     }
 
     #[test]

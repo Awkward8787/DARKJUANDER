@@ -11,6 +11,9 @@ tempfile.workspace = true
 
 [dependencies]
 dj-label.workspace = true
+ed25519-dalek.workspace = true
+fs2.workspace = true
+getrandom.workspace = true
 hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

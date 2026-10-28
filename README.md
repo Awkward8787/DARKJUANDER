@@ -9,16 +9,40 @@ The product requirements are in [docs/PRD.md](docs/PRD.md). The diagrams are
 [docs/diagrams/architecture.mmd](docs/diagrams/architecture.mmd) and
 [docs/diagrams/umbra-dataflow.mmd](docs/diagrams/umbra-dataflow.mmd).
 
+## What the demos do not prove
+
+`dj demo` and `cargo test` run the mock engine on the host that builds the
+tests. Passing them does not mean DARKJUANDER enforces the PRD threat model.
+
+- A private file read through the broker returns a span, not the bytes, and
+  that call raises the caller's session floor. Resubmitting those bytes in the
+  same session with a public label stays local. An agent that copies the bytes
+  through some other channel, or into a different session that never touched
+  the file, is not caught. Content inspection (PRD PE-6 and PE-7) is not built.
+- The audit log detects truncation and field swaps against its signed
+  checkpoint. It is not encrypted. Replacing the signing key and the log
+  together looks like a new install. The key is `{log_dir}/keys/audit.ed25519`
+  unless `DJ_AUDIT_SIGNING_KEY` points somewhere else. Agents must not be able
+  to write that file.
+- `workspace = "/"` is rejected. The seccomp profile is still a denylist, not
+  an allowlist. cgroup limits and the SELinux domain are not enforced by these
+  tests.
+- No disk image has been built or booted. Section 7.9 numbers are targets.
+- `allow_psi_override` is false in `examples/config/umbrad.yaml` and must stay
+  false outside tests. The demo turns it on only in a temporary config so
+  scene 4 can cross the PSI threshold without filling the machine's RAM.
+
 ## What works today
 
 On a Linux machine, `cargo test` and `dj demo` run five scenes against a mock
-engine. No weights are required.
+engine. No weights are required. Read the section above before treating a pass
+as a security boundary.
 
 1. Two agents call `mid-local`. The registry shows one resident copy and both callers.
 2. Agent A hits its own prefix cache. Agent B, in another trust domain, misses. The miss response does not name Agent A's domain.
 3. A test page with a hidden `email.send` instruction is labeled untrusted. The broker records an approval prompt and then denies the send. `dj audit verify` accepts the log.
 4. When PSI `memory some avg10` crosses the threshold, new `default-chat` requests move from `mid-local` to `small-local`. The audit reason contains `PSI memory some avg10`.
-5. A file read through the broker is labeled private. The router's scorer still prefers the cloud model, and the hard rule keeps the call on `mid-local`. The cloud engine's call count stays 0. The private file body is not written to the audit log.
+5. A private file read returns a span handle and no bytes. The same agent then resubmits those bytes with a public label. The session floor stays private, the scorer still prefers the cloud model, and the hard rule keeps the call on `mid-local`. The cloud engine's call count stays 0. The private bytes are not written to the audit log.
 
 `umbrad` serves a Unix socket. `GET /v1/models` and `POST /v1/chat/completions` are the OpenAI-shaped routes. Tool calls go to `POST /v1/dj/tool`. `GET /v1/dj/top` is the admin view.
 

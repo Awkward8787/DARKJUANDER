@@ -20,7 +20,8 @@ Follow-ups that this PR deliberately did not build. Priority names are the PRD's
 | GW-1 | Chat completions and the models list exist. Streaming and tool-call streaming do not. |
 | GW-2 | No Anthropic messages endpoint. |
 | GW-6 | No keyring. There is no cloud client, so there is no stored provider key. |
-| SB-2 | The seccomp filter is a denylist installed in the child. It is not an allowlist, and CI does not execute it. |
+| SB-2 | The child seccomp profile is still a denylist (`dj_sandbox::DENIED_SYSCALLS`). An allowlist is future work; a short allowlist would break ordinary agent programs, so this slice does not pretend to have one. CI does not execute the filter. |
+| PE-6, PE-7 | No content inspection. Session floors stop the broker-read laundering path. They do not stop a copied byte string that arrives through another channel. |
 | SB-5 | cgroup limits are attempted and reported. They are not applied unless the host cgroup tree accepts the write. |
 | SB-8 | No kill switch UI. Stopping the process is left to the operator. |
 | PB-4, PB-6, UI-3 | Approval is fail-closed. There is no trusted dialog. |
