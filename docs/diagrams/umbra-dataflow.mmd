@@ -1,0 +1,49 @@
+flowchart LR
+    subgraph Callers["Apps and sandboxed agents"]
+        A1["Agent A<br/>trust domain A"]
+        A2["Agent B<br/>trust domain B"]
+        APP["App (for example SONA)"]
+    end
+
+    subgraph Gateway["dj-gateway"]
+        LBL["umbra-label<br/>tag every input span"]
+        RT["umbra-route<br/>1. hard rules<br/>2. learned scorer"]
+    end
+
+    subgraph Umbrad["umbrad (confined daemon)"]
+        REG["Resource registry<br/>models, experts, KV blocks"]
+        CACHE["umbra-cache<br/>partitioned by trust domain and label"]
+        PAGE["umbra-page<br/>expert predictor and prefetch"]
+        MEM["umbra-memory<br/>permissioned local index"]
+    end
+
+    subgraph Kernel["Linux kernel (stock features)"]
+        PSI["PSI and cgroup v2<br/>pressure and accounting"]
+        BPF["BPF tracing and optional sched_ext"]
+        PC["Page cache<br/>one copy of weights"]
+    end
+
+    ENG["Local engines<br/>(llama.cpp-style, colibri-style)"]
+    CLOUD["Cloud models<br/>(only if labels and policy allow)"]
+    BROKER["dj-broker and dj-policy"]
+    AUDIT["dj-audit"]
+
+    A1 --> LBL
+    A2 --> LBL
+    APP --> LBL
+    LBL --> BROKER
+    BROKER -->|"allowed, with labels"| RT
+    RT -->|"query machine state"| REG
+    PSI --> REG
+    BPF --> PAGE
+    RT -->|"local"| ENG
+    RT -->|"cloud"| CLOUD
+    ENG <--> CACHE
+    ENG <--> PC
+    PAGE -->|"readahead hints"| PC
+    MEM -->|"filtered by grants"| BROKER
+    ENG -->|"output labeled with joined input labels"| LBL
+    CLOUD -->|"output labeled untrusted plus input labels"| LBL
+    RT --> AUDIT
+    LBL --> AUDIT
+    CACHE --> AUDIT

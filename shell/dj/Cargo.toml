@@ -1,0 +1,20 @@
+[package]
+name = "dj"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "DARKJUANDER command line"
+
+[[bin]]
+name = "dj"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+dj-audit.workspace = true
+dj-gateway.workspace = true
+dj-sandbox.workspace = true
+
+[lints]
+workspace = true

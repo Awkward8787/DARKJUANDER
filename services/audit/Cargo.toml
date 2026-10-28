@@ -1,0 +1,21 @@
+[package]
+name = "dj-audit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Hash-chained append-only audit log"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[dependencies]
+dj-label.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

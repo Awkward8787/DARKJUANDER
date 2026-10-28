@@ -1,0 +1,23 @@
+[Unit]
+Description=Optional llama.cpp server for DARKJUANDER
+# Not enabled. The binary and the GGUF are installed by scripts/build-llama.sh
+# and scripts/fetch-model.sh. v0.8.0 listens on port 9931 by default.
+ConditionPathExists=/usr/libexec/darkjuander/llama-server
+ConditionPathExists=/var/lib/darkjuander/models/default.gguf
+
+[Service]
+Type=simple
+User=dj-umbra
+Group=dj-umbra
+ExecStart=/usr/libexec/darkjuander/llama-server --model /var/lib/darkjuander/models/default.gguf --host 127.0.0.1 --port 9931
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+IPAddressAllow=localhost
+IPAddressDeny=any
+ReadOnlyPaths=/var/lib/darkjuander/models
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+# DRAFT. Not compiled and not loaded.
+# Fedora's stock policy still applies. This file is a sketch of a later
+# dj_umbra_t domain so the intent is in the repo. Do not treat it as enforced.
+# scripts/check-selinux.sh runs checkmodule when the host has selinux-policy-devel.
+
+policy_module(darkjuander, 0.1)
+
+type dj_umbra_t;
+type dj_umbra_exec_t;
+type dj_agent_t;
+
+require {
+    type unconfined_service_t;
+    class process transition;
+    class file { read execute entrypoint };
+}

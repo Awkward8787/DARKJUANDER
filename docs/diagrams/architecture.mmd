@@ -1,0 +1,51 @@
+flowchart TB
+    subgraph User["User space: apps and agents"]
+        APP["Regular apps<br/>(SONA, browsers, IDEs)"]
+        AG1["Agent A<br/>(sandboxed)"]
+        AG2["Agent B<br/>(sandboxed)"]
+        SHELL["dj-shell<br/>control center and approval prompts"]
+    end
+
+    subgraph Core["DARKJUANDER system services"]
+        GW["dj-gateway<br/>OpenAI / Anthropic-compatible API<br/>localhost only"]
+        BROKER["dj-broker<br/>permission broker"]
+        POLICY["dj-policy<br/>policy engine and taint tracking"]
+        AUDIT["dj-audit<br/>hash-chained audit log"]
+        MODELS["dj-models<br/>model manager and provenance"]
+        RUNTIME["dj-runtime<br/>local inference engines"]
+        UMBRA["umbrad (UMBRA neural core)<br/>shared models, experts, KV caches<br/>labels, routing, expert paging"]
+    end
+
+    subgraph Backends["Model back ends"]
+        LOCAL["Local engines<br/>(llama.cpp-style, colibri, others)"]
+        CLOUD["Cloud providers<br/>(user's own API keys)"]
+    end
+
+    subgraph Base["dj-base: hardened Linux"]
+        KERNEL["Linux kernel<br/>namespaces, seccomp, Landlock, SELinux, cgroups"]
+        BOOT["Secure boot, TPM, LUKS encryption<br/>read-only root, A/B updates"]
+    end
+
+    APP -->|"model calls"| GW
+    AG1 -->|"model calls"| GW
+    AG2 -->|"model calls"| GW
+    AG1 -->|"tool calls, file, network"| BROKER
+    AG2 -->|"tool calls, file, network"| BROKER
+    BROKER --> POLICY
+    POLICY -->|"needs approval"| SHELL
+    SHELL -->|"approve or deny"| BROKER
+    GW --> POLICY
+    GW --> RUNTIME
+    GW -->|"egress via broker rules"| CLOUD
+    RUNTIME --> LOCAL
+    MODELS -->|"verified weights"| RUNTIME
+    GW <-->|"route and label"| UMBRA
+    UMBRA -->|"residency, cache, prefetch"| RUNTIME
+    UMBRA -->|"labels"| POLICY
+    UMBRA --> AUDIT
+    KERNEL -->|"PSI, cgroups, BPF events"| UMBRA
+    BROKER --> AUDIT
+    GW --> AUDIT
+    POLICY --> AUDIT
+    Core --> KERNEL
+    KERNEL --- BOOT

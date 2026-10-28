@@ -1,0 +1,44 @@
+# dj-base
+# Fedora bootc 45, the current stable tag on 2026-10-28 (aarch64 and x86_64).
+# bootc supplies the read-only root and A/B updates when this image is installed
+# to a disk. The container build itself is not a running system, and this file
+# has not been built or booted in CI.
+FROM quay.io/fedora/fedora-bootc:45
+
+ARG DJ_VERSION=0.1.0
+
+RUN dnf -y install --setopt=install_weak_deps=False \
+      bubblewrap \
+      nftables \
+      policycoreutils \
+      jq \
+      stress-ng \
+      openssl \
+      ca-certificates \
+    && dnf clean all
+
+# BASE-6: do not listen on the network by default. sshd is disabled when the
+# base image ships the unit. BASE-8: mask the rpm-ostree count-me timer when present.
+RUN if [ -f /usr/lib/systemd/system/sshd.service ]; then systemctl disable sshd.service; fi \
+    && if [ -f /usr/lib/systemd/system/rpm-ostree-countme.timer ]; then systemctl mask rpm-ostree-countme.timer; fi \
+    && if [ -f /usr/lib/systemd/system/rpm-ostree-countme.service ]; then systemctl mask rpm-ostree-countme.service; fi
+
+COPY out/stage/umbrad /usr/bin/umbrad
+COPY out/stage/dj /usr/bin/dj
+COPY policy/default.yaml /usr/share/darkjuander/policy/default.yaml
+COPY examples/config/umbrad.yaml /etc/darkjuander/umbrad.yaml
+COPY image/systemd/ /usr/lib/systemd/system/
+COPY image/sysctl.d/90-darkjuander.conf /usr/lib/sysctl.d/90-darkjuander.conf
+COPY image/nftables.conf /etc/sysconfig/nftables.conf
+COPY image/sysusers.d/darkjuander.conf /usr/lib/sysusers.d/darkjuander.conf
+COPY image/tmpfiles.d/darkjuander.conf /usr/lib/tmpfiles.d/darkjuander.conf
+COPY image/selinux/ /usr/share/darkjuander/selinux/
+
+RUN systemctl enable umbrad.service nftables.service
+
+LABEL org.opencontainers.image.title="dj-base" \
+      org.opencontainers.image.description="DARKJUANDER hardened bootc image definition. Not signed." \
+      org.opencontainers.image.version="${DJ_VERSION}" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.source="https://github.com/Awkward8787/DARKJUANDER" \
+      org.darkjuander.status="definition-not-built-in-ci"

@@ -1,0 +1,41 @@
+# Image default. Local only. The mock engine is what answers until you point
+# an engine at llama-server. The token below is a local placeholder. The socket
+# is mode 0600 and owned by dj-umbra. Replace the token before you widen access.
+socket: /run/darkjuander/umbrad.sock
+audit_path: /var/lib/darkjuander/audit.log
+policy_path: /usr/share/darkjuander/policy/default.yaml
+local_only: true
+prefer_cloud: false
+psi_memory_some_avg10_threshold: 25.0
+psi_memory_path: /proc/pressure/memory
+psi_io_path: /proc/pressure/io
+allow_psi_override: false
+private_paths: []
+secret_paths: []
+models:
+  small-local:
+    engine: mock
+    location: local
+    size: small
+    memory_mb: 2500
+  mid-local:
+    engine: mock
+    location: local
+    size: mid
+    memory_mb: 8000
+aliases:
+  default-chat:
+    small: small-local
+    mid: mid-local
+engines:
+  mock:
+    kind: mock
+principals:
+  - id: console
+    token: local-dev-token
+    trust_domain: console
+    local_only: true
+    grants:
+      - "model.use:default-chat"
+      - "model.use:mid-local"
+      - "model.use:small-local"

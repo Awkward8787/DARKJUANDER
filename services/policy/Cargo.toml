@@ -1,0 +1,16 @@
+[package]
+name = "dj-policy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Declarative allow, deny, and approval rules"
+
+[dependencies]
+dj-label.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

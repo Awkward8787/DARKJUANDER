@@ -1,0 +1,13 @@
+[package]
+name = "dj-label"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "UMBRA integrity and confidentiality labels"
+
+[dependencies]
+serde.workspace = true
+
+[lints]
+workspace = true
