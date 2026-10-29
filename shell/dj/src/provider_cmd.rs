@@ -90,9 +90,14 @@ pub fn grant(state: &Path, id: &str, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
-pub fn test(state: &Path, id: &str, base_url: Option<&str>) -> Result<(), String> {
+pub fn test(
+    state: &Path,
+    id: &str,
+    base_url: Option<&str>,
+    allow_untrusted_host: bool,
+) -> Result<(), String> {
     let line = ProviderStore::new(state)
-        .probe(id, base_url)
+        .probe(id, base_url, allow_untrusted_host)
         .map_err(|err| err.to_string())?;
     println!("{line}");
     Ok(())
@@ -110,10 +115,10 @@ pub fn login(state: &Path, id: &str) -> Result<(), String> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|err| err.to_string())?;
     let port = listener.local_addr().map_err(|err| err.to_string())?.port();
     let redirect = format!("http://127.0.0.1:{port}/auth/callback");
-    let (issued, hint, email) = match store.openai_reauth_hint() {
-        Some((client_id, id_token, email)) => (Some(client_id), Some(id_token), email),
-        None => (None, None, None),
-    };
+    let saved = store.openai_reauth_hint();
+    let issued = saved.as_ref().map(|hint| hint.client_id.clone());
+    let hint = saved.as_ref().map(|hint| hint.id_token.clone());
+    let email = saved.as_ref().and_then(|hint| hint.email.clone());
     let request = siwc::begin_authorization(
         &endpoints,
         &redirect,
@@ -141,10 +146,8 @@ pub fn login(state: &Path, id: &str) -> Result<(), String> {
     if let Some(error) = &callback.error {
         return Err(format!("sign-in failed closed: {error}"));
     }
-    let client_id = match callback.client_id.clone().or(issued) {
-        Some(id) if id != siwc::DYNAMIC_CLIENT => id,
-        _ => return Err("sign-in did not return an issued client id".into()),
-    };
+    let client_id = reauth_client_id(issued.as_deref(), callback.client_id.as_deref())?;
+    let expected_subject = reauth_subject(saved.as_ref().map(|hint| hint.subject.as_str()))?;
     let body = siwc::exchange_code(
         &endpoints,
         &request.redirect_uri,
@@ -167,7 +170,7 @@ pub fn login(state: &Path, id: &str) -> Result<(), String> {
             issuer: &endpoints.issuer,
             audience: &client_id,
             nonce: Some(&request.nonce),
-            subject: None,
+            subject: expected_subject,
         },
     )
     .map_err(|err| err.to_string())?;
@@ -200,6 +203,32 @@ pub fn model(state: &Path, id: &str, model_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn reauth_subject(stored: Option<&str>) -> Result<Option<&str>, String> {
+    match stored {
+        Some("") => Err("stored subscription has no subject; refusing to replace it".into()),
+        Some(subject) => Ok(Some(subject)),
+        None => Ok(None),
+    }
+}
+
+/// Returning sign-in must keep the issued client id. A different id is refused.
+pub(crate) fn reauth_client_id(
+    stored: Option<&str>,
+    returned: Option<&str>,
+) -> Result<String, String> {
+    match (stored, returned) {
+        (Some(stored), Some(returned)) if returned != stored => {
+            Err("sign-in client id did not match the stored registration".into())
+        }
+        (_, Some(returned)) if returned == siwc::DYNAMIC_CLIENT || returned.is_empty() => {
+            Err("sign-in did not return an issued client id".into())
+        }
+        (Some(stored), None) => Ok(stored.to_string()),
+        (_, Some(returned)) => Ok(returned.to_string()),
+        (None, None) => Err("sign-in did not return an issued client id".into()),
+    }
+}
+
 fn credential_path(state: &Path, id: &str) -> String {
     state
         .join("credentials")
@@ -223,4 +252,31 @@ fn print_yaml_hint(id: &str, model: &str) {
     println!("    memory_mb: 0");
     println!("    provider: {id}");
     let _ = std::io::stdout().flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reauth_rejects_a_different_client_id_and_keeps_the_subject() {
+        let err = reauth_client_id(Some("oaiapp_stored"), Some("oaiapp_other")).unwrap_err();
+        assert!(err.contains("did not match"));
+        assert_eq!(
+            reauth_client_id(Some("oaiapp_stored"), None).unwrap(),
+            "oaiapp_stored"
+        );
+        assert_eq!(
+            reauth_client_id(Some("oaiapp_stored"), Some("oaiapp_stored")).unwrap(),
+            "oaiapp_stored"
+        );
+        assert!(reauth_client_id(Some("oaiapp_stored"), Some("dynamic_agent_client")).is_err());
+        assert_eq!(
+            reauth_client_id(None, Some("oaiapp_new")).unwrap(),
+            "oaiapp_new"
+        );
+        assert_eq!(reauth_subject(Some("user-1")).unwrap(), Some("user-1"));
+        assert_eq!(reauth_subject(None).unwrap(), None);
+        assert!(reauth_subject(Some("")).is_err());
+    }
 }

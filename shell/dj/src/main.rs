@@ -81,6 +81,9 @@ enum ProviderCommand {
         provider: String,
         #[arg(long)]
         base_url: Option<String>,
+        /// Send the bearer key to a host other than the provider preset or loopback.
+        #[arg(long)]
+        allow_untrusted_host: bool,
         #[arg(long)]
         state_dir: Option<PathBuf>,
     },
@@ -236,11 +239,13 @@ fn real_main() -> Result<ExitCode, String> {
             ProviderCommand::Test {
                 provider,
                 base_url,
+                allow_untrusted_host,
                 state_dir,
             } => provider_cmd::test(
                 &provider_cmd::state_dir(state_dir),
                 &provider,
                 base_url.as_deref(),
+                allow_untrusted_host,
             ),
             ProviderCommand::Login {
                 provider,

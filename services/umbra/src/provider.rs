@@ -249,17 +249,24 @@ impl ProviderStore {
         Ok(())
     }
 
-    pub fn probe(&self, id: &str, base_url: Option<&str>) -> Result<String, ProviderError> {
+    pub fn probe(
+        &self,
+        id: &str,
+        base_url: Option<&str>,
+        allow_untrusted_host: bool,
+    ) -> Result<String, ProviderError> {
         let record = self.get(id)?;
         if record.default_model.is_empty() {
             return Err(ProviderError::Invalid(
                 "set a model with `dj provider add --model` before testing".into(),
             ));
         }
+        let base_url = base_url.unwrap_or(&record.base_url);
+        probe_target_allowed(&record.id, base_url, allow_untrusted_host)?;
         let engine = RemoteEngine::new(RemoteConfig {
             name: record.id.clone(),
             provider: record.id.clone(),
-            base_url: base_url.unwrap_or(&record.base_url).to_string(),
+            base_url: base_url.to_string(),
             timeout: Duration::from_secs(30),
             retries: 1,
             backoff: Duration::from_millis(200),
@@ -284,16 +291,21 @@ impl ProviderStore {
         ))
     }
 
-    /// Issued client id, retained id token, and email for a later OpenAI sign-in.
+    /// Issued client id, retained id token, email, and subject for a later OpenAI sign-in.
     /// The id token is a credential. Callers must not print it.
-    pub fn openai_reauth_hint(&self) -> Option<(String, String, Option<String>)> {
+    pub fn openai_reauth_hint(&self) -> Option<OpenAiReauth> {
         let record = self.get("openai").ok()?;
         let CredentialSource::File { path, .. } = &record.credential else {
             return None;
         };
         let bytes = credential::read_owner_only(path).ok()?;
         let saved: SubscriptionCredential = serde_json::from_slice(&bytes).ok()?;
-        Some((saved.client_id, saved.id_token, saved.email))
+        Some(OpenAiReauth {
+            client_id: saved.client_id,
+            id_token: saved.id_token,
+            email: saved.email,
+            subject: saved.subject,
+        })
     }
 
     pub fn host_id(&self) -> Result<String, ProviderError> {
@@ -398,6 +410,74 @@ pub fn read_key_source(path: Option<&Path>) -> Result<Secret, ProviderError> {
 }
 
 /// Official consumer-subscription sign-in. Only OpenAI documents one.
+/// Where `dj provider test` may send the bearer key.
+///
+/// The preset host and loopback are allowed. Any other host needs
+/// `allow_untrusted_host`. This returns before a socket is opened.
+pub fn probe_target_allowed(
+    provider_id: &str,
+    url: &str,
+    allow_untrusted_host: bool,
+) -> Result<(), ProviderError> {
+    if url.contains('@') {
+        return Err(ProviderError::Invalid(
+            "refusing a provider URL that embeds credentials".into(),
+        ));
+    }
+    let host = url_host(url)?;
+    if is_loopback(&host) {
+        return Ok(());
+    }
+    let preset_host = url_host(preset(provider_id)?.base_url)?;
+    if host.eq_ignore_ascii_case(&preset_host) {
+        return Ok(());
+    }
+    if allow_untrusted_host {
+        return Ok(());
+    }
+    Err(ProviderError::Invalid(format!(
+        "refusing to send the {provider_id} key to {host}; pass --allow-untrusted-host to override"
+    )))
+}
+
+fn url_host(url: &str) -> Result<String, ProviderError> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .ok_or_else(|| ProviderError::Invalid("provider URL must be http or https".into()))?;
+    let authority = rest.split('/').next().unwrap_or("");
+    if let Some(host) = authority.strip_prefix('[') {
+        let end = host
+            .find(']')
+            .ok_or_else(|| ProviderError::Invalid("provider URL has a bad IPv6 host".into()))?;
+        let host = &host[..end];
+        if host.is_empty() {
+            return Err(ProviderError::Invalid("provider URL has no host".into()));
+        }
+        return Ok(host.to_string());
+    }
+    let host = authority
+        .split_once(':')
+        .map(|(host, _)| host)
+        .unwrap_or(authority);
+    if host.is_empty() {
+        return Err(ProviderError::Invalid("provider URL has no host".into()));
+    }
+    Ok(host.to_string())
+}
+
+fn is_loopback(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
+}
+
+#[derive(Clone, Debug)]
+pub struct OpenAiReauth {
+    pub client_id: String,
+    pub id_token: String,
+    pub email: Option<String>,
+    pub subject: String,
+}
+
 pub fn subscription_available(id: &str) -> Result<(), ProviderError> {
     match id {
         "openai" => Ok(()),
@@ -448,5 +528,48 @@ mod tests {
         let err = subscription_available("xai").unwrap_err();
         assert!(err.to_string().contains("docs.x.ai"));
         assert!(subscription_available("openai").is_ok());
+    }
+
+    #[test]
+    fn probe_base_url_stays_on_the_preset_host_or_loopback() {
+        assert!(probe_target_allowed("xai", "https://api.x.ai/v1", false).is_ok());
+        assert!(probe_target_allowed("openai", "https://api.openai.com/v1", false).is_ok());
+        assert!(probe_target_allowed("xai", "http://127.0.0.1:9/v1", false).is_ok());
+        assert!(probe_target_allowed("xai", "http://[::1]:9/v1", false).is_ok());
+        let evil = probe_target_allowed("xai", "https://collector.invalid/v1", false).unwrap_err();
+        assert!(evil.to_string().contains("--allow-untrusted-host"));
+        assert!(probe_target_allowed("xai", "https://api.openai.com/v1", false).is_err());
+        assert!(probe_target_allowed("xai", "https://api.x.ai.evil.com/v1", false).is_err());
+        assert!(probe_target_allowed("xai", "https://collector.invalid/v1", true).is_ok());
+        assert!(probe_target_allowed("xai", "https://user:secret@api.x.ai/v1", true).is_err());
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 2048];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let payload = r#"{"choices":[{"message":{"content":"pong"}}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                payload.len()
+            );
+            let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let store = ProviderStore::new(dir.path());
+        store
+            .add_api_key("xai", "sk-test-CANARYKEY", "grok-test", false)
+            .unwrap();
+        let refused = store
+            .probe("xai", Some("https://collector.invalid/v1"), false)
+            .unwrap_err();
+        assert!(refused.to_string().contains("--allow-untrusted-host"));
+        assert!(!refused.to_string().contains("CANARYKEY"));
+        let ok = store
+            .probe("xai", Some(&format!("http://127.0.0.1:{port}/v1")), false)
+            .unwrap();
+        assert!(ok.contains("xai"));
+        assert!(!ok.contains("CANARYKEY"));
     }
 }
