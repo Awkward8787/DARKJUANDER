@@ -172,7 +172,6 @@ jobs:
       - name: anaconda iso
         id: iso
         if: always() && steps.qcow2.outcome == 'success'
-        continue-on-error: true
         run: |
           ./scripts/build-release-disk.sh \
             "localhost/dj-base:${{ steps.ver.outputs.version }}" \

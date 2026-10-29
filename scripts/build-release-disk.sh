@@ -64,9 +64,20 @@ RUN if ls /etc/yum.repos.d/*.repo >/dev/null 2>&1; then \\
            'enabled=1' \\
            'countme=0' \\
            'gpgcheck=1' \\
-           'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-\$basearch' \\
+           'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary' \\
            > /etc/yum.repos.d/fedora-darkjuander.repo; \\
-       fi
+       fi \\
+    && mkdir -p /etc/pki/rpm-gpg \\
+    && if command -v curl >/dev/null; then \\
+         curl -fsSL -o /etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary https://fedoraproject.org/fedora.gpg; \\
+       elif command -v python3 >/dev/null; then \\
+         python3 -c 'import urllib.request; urllib.request.urlretrieve("https://fedoraproject.org/fedora.gpg", "/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary")'; \\
+       else \\
+         echo "ISO depsolve image needs curl or python3 to fetch the Fedora GPG key" >&2; \\
+         exit 1; \\
+       fi \\
+    && test -s /etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary \\
+    && sed -i -E 's|^gpgkey=.*|gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary|' /etc/yum.repos.d/*.repo
 EOF
   sudo podman build -f "${work}/Containerfile" -t "${source_tag}" "${work}"
 fi

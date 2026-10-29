@@ -78,10 +78,15 @@ set +e
 python3 - "${qemu}" "${firmware}" "${image}" "${log}" "${result}" "${password}" "${timeout_secs}" \
   "${machine[@]}" -- "${netdev[@]}" << 'PY'
 import os
+import re
 import selectors
 import subprocess
 import sys
 import time
+
+# systemd colors the console, so "Reached target multi-user.target" is not
+# contiguous bytes. Match the phrase after stripping those sequences.
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 qemu = sys.argv[1]
 firmware = sys.argv[2]
@@ -144,9 +149,9 @@ try:
             log.write(chunk)
             log.flush()
             buf += chunk
-            text = buf.decode("utf-8", "replace")
+            text = ANSI.sub("", buf.decode("utf-8", "replace"))
             tail = text[-400:]
-            if "Reached target Multi-User System" in text or "Reached target multi-user" in text:
+            if "Reached target multi-user.target" in text or "Multi-User System" in text:
                 multi = True
             if (not sent_user) and "login:" in tail:
                 proc.stdin.write(b"dj\n")
