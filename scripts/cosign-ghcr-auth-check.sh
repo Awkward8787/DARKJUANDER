@@ -1,39 +1,20 @@
 #!/usr/bin/env bash
-# Prove cosign can authenticate to GHCR without pushing an image.
+# Log cosign into GHCR and require the credential in the docker config
+# cosign reads. Then ask about a digest that does not exist.
 #
-# cosign login writes the runner user's docker config. A later cosign
-# registry call must use that config. This script logs in, computes a
-# signature name locally (triangulate), then asks GHCR for a digest that
-# does not exist. Manifest-unknown means the token was accepted. An
-# unauthenticated response is a failure.
+# A public package returns the same manifest answer to an anonymous client,
+# so that read is not the auth check. The auth check is the ghcr.io entry
+# written by cosign login. The read only passes on MANIFEST_UNKNOWN or
+# "no signatures found". Every other result fails.
 set -euo pipefail
 
 actor=${GH_ACTOR:?}
 token=${GH_TOKEN:?}
 image=${COSIGN_IMAGE:-ghcr.io/awkward8787/darkjuander}
-
-if [[ "${COSIGN_AUTH_FIXTURE:-}" == "reject" ]]; then
-  sample='UNAUTHORIZED: unauthenticated: User cannot be authenticated with the token provided.'
-elif [[ "${COSIGN_AUTH_FIXTURE:-}" == "missing" ]]; then
-  sample='manifest unknown: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-else
-  sample=
-fi
-
-registry_auth_rejected() {
-  printf '%s\n' "$1" | grep -Eqi 'UNAUTHORIZED|cannot be authenticated|unauthenticated|requested access to the resource is denied'
-}
-
-if [[ -n "${sample}" ]]; then
-  if registry_auth_rejected "${sample}"; then
-    echo "fixture classified as an auth rejection" >&2
-    exit 1
-  fi
-  echo "fixture classified as a registry response, not an auth rejection"
-  exit 0
-fi
+root=$(cd "$(dirname "$0")" && pwd)
 
 printf '%s\n' "${token}" | cosign login ghcr.io --username "${actor}" --password-stdin
+"${root}/assert-cosign-docker-config.sh"
 
 throwaway=$(printf 'a%.0s' {1..64})
 ref="${image}@sha256:${throwaway}"
@@ -51,8 +32,13 @@ if [[ "${status}" -eq 0 ]]; then
   echo "throwaway digest must not verify" >&2
   exit 1
 fi
-if registry_auth_rejected "${err}"; then
-  echo "cosign registry auth was rejected" >&2
-  exit 1
+if printf '%s\n' "${err}" | grep -q 'MANIFEST_UNKNOWN'; then
+  echo "GHCR reported MANIFEST_UNKNOWN for the throwaway digest"
+  exit 0
 fi
-echo "cosign reached GHCR with the docker config from cosign login"
+if printf '%s\n' "${err}" | grep -F -q 'no signatures found'; then
+  echo "cosign reported no signatures found for the throwaway digest"
+  exit 0
+fi
+echo "cosign verify did not return an allowed registry answer" >&2
+exit 1
