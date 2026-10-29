@@ -15,6 +15,7 @@ clap.workspace = true
 dj-audit.workspace = true
 dj-gateway.workspace = true
 dj-sandbox.workspace = true
+umbra.workspace = true
 
 [lints]
 workspace = true

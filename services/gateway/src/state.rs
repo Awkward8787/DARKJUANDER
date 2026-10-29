@@ -3,12 +3,16 @@ use dj_audit::{AuditLog, AuditPaths, Event};
 use dj_broker::{Broker, Principal};
 use dj_label::Labels;
 use dj_policy::Policy;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use umbra::credential::{CredentialFormat, CredentialSource};
 use umbra::engine::llama::LlamaEngine;
 use umbra::engine::mock::MockEngine;
+use umbra::engine::remote::{RemoteConfig, RemoteEngine, Wire};
 use umbra::engine::Engine;
+use umbra::provider::{ProviderAuth, ProviderRecord, WireKind};
 use umbra::{AliasSpec, Cache, Location, ModelSpec, Registry, SizeClass};
 
 #[derive(Clone)]
@@ -29,6 +33,7 @@ struct Inner {
     engines: HashMap<String, Arc<dyn Engine>>,
     models: BTreeMap<String, ModelSpec>,
     aliases: BTreeMap<String, AliasSpec>,
+    enabled_providers: BTreeSet<String>,
     spans: Mutex<HashMap<String, StoredSpan>>,
     last_labels: Mutex<HashMap<String, Labels>>,
     psi_override: Mutex<Option<umbra::PsiSnapshot>>,
@@ -41,7 +46,15 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn from_config(cfg: FileConfig) -> Result<Self, ConfigError> {
+    pub fn from_config(mut cfg: FileConfig) -> Result<Self, ConfigError> {
+        let provider_records = load_registry(&cfg)?;
+        apply_registry(&mut cfg, &provider_records)?;
+        let enabled_providers = cfg
+            .providers
+            .iter()
+            .filter(|(_, toggle)| toggle.granted)
+            .map(|(id, _)| id.clone())
+            .collect::<BTreeSet<_>>();
         let policy = Policy::from_path(&cfg.policy_path).map_err(|err| {
             ConfigError::Invalid(format!("policy {}: {err}", cfg.policy_path.display()))
         })?;
@@ -68,6 +81,7 @@ impl AppState {
                 size: parse_size(&model.size)?,
                 memory_mb: model.memory_mb,
                 engine: model.engine.clone(),
+                provider: model.provider.clone(),
             };
             registry.insert(spec.clone());
             models.insert(id.clone(), spec);
@@ -102,7 +116,8 @@ impl AppState {
                     engine.base_url.clone().unwrap_or_default(),
                     engine.timeout_secs.unwrap_or(120),
                 )),
-                _ => unreachable!("checked in FileConfig::from_str"),
+                "openai-compatible" => Arc::new(build_remote(name, engine, &provider_records)?),
+                _ => unreachable!("checked in FileConfig::parse"),
             };
             engines.insert(name.clone(), boxed);
         }
@@ -134,12 +149,168 @@ impl AppState {
                 engines,
                 models,
                 aliases,
+                enabled_providers,
                 spans: Mutex::new(HashMap::new()),
                 last_labels: Mutex::new(HashMap::new()),
                 psi_override: Mutex::new(None),
                 chat_seq: AtomicU64::new(0),
             }),
         })
+    }
+}
+
+fn load_registry(cfg: &FileConfig) -> Result<BTreeMap<String, ProviderRecord>, ConfigError> {
+    let Some(path) = &cfg.provider_registry else {
+        return Ok(BTreeMap::new());
+    };
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+    #[derive(serde::Deserialize)]
+    struct File {
+        version: u32,
+        #[serde(default)]
+        providers: BTreeMap<String, ProviderRecord>,
+    }
+    let text = std::fs::read_to_string(path)?;
+    let file: File = serde_yaml::from_str(&text)?;
+    if file.version != 1 {
+        return Err(ConfigError::Invalid(format!(
+            "unsupported provider registry version {}",
+            file.version
+        )));
+    }
+    Ok(file.providers)
+}
+
+fn apply_registry(
+    cfg: &mut FileConfig,
+    registry: &BTreeMap<String, ProviderRecord>,
+) -> Result<(), ConfigError> {
+    for (id, record) in registry {
+        let toggle = cfg.providers.entry(id.clone()).or_default();
+        if record.granted {
+            toggle.granted = true;
+        }
+        if !record.granted || record.default_model.is_empty() {
+            continue;
+        }
+        if cfg.models.contains_key(&record.default_model) {
+            continue;
+        }
+        let engine_name = format!("provider-{id}");
+        cfg.engines.insert(
+            engine_name.clone(),
+            crate::config::EngineConfig {
+                kind: "openai-compatible".into(),
+                base_url: Some(record.base_url.clone()),
+                timeout_secs: Some(60),
+                provider: Some(id.clone()),
+                retries: Some(2),
+                stream: Some(matches!(record.wire, WireKind::Responses)),
+                backoff_ms: Some(200),
+                credential_file: match &record.credential {
+                    CredentialSource::File { path, .. } => Some(path.clone()),
+                    CredentialSource::Systemd { .. } => None,
+                },
+                credential_systemd: match &record.credential {
+                    CredentialSource::Systemd { name, .. } => Some(name.clone()),
+                    CredentialSource::File { .. } => None,
+                },
+                wire: Some(
+                    match record.wire {
+                        WireKind::ChatCompletions => "chat-completions",
+                        WireKind::Responses => "responses",
+                    }
+                    .into(),
+                ),
+            },
+        );
+        cfg.models.insert(
+            record.default_model.clone(),
+            crate::config::ModelConfig {
+                engine: engine_name,
+                location: "cloud".into(),
+                size: "large".into(),
+                memory_mb: 0,
+                provider: Some(id.clone()),
+            },
+        );
+        if let Some(alias_name) = &record.alias {
+            if let Some(alias) = cfg.aliases.get_mut(alias_name) {
+                alias.cloud = Some(record.default_model.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn build_remote(
+    name: &str,
+    engine: &crate::config::EngineConfig,
+    registry: &BTreeMap<String, ProviderRecord>,
+) -> Result<RemoteEngine, ConfigError> {
+    let provider = engine.provider.clone().unwrap_or_else(|| name.to_string());
+    let record = registry.get(&provider);
+    let base_url = engine
+        .base_url
+        .clone()
+        .filter(|url| !url.is_empty())
+        .or_else(|| record.map(|record| record.base_url.clone()))
+        .ok_or_else(|| ConfigError::Invalid(format!("engine {name} needs base_url")))?;
+    let credential = if let Some(path) = &engine.credential_file {
+        CredentialSource::File {
+            path: path.clone(),
+            format: credential_format(engine, record),
+        }
+    } else if let Some(systemd_name) = &engine.credential_systemd {
+        CredentialSource::Systemd {
+            name: systemd_name.clone(),
+            format: credential_format(engine, record),
+        }
+    } else if let Some(record) = record {
+        record.credential.clone()
+    } else {
+        return Err(ConfigError::Invalid(format!(
+            "engine {name} needs a credential file or systemd credential"
+        )));
+    };
+    let wire = match engine.wire.as_deref() {
+        Some("responses") => Wire::Responses,
+        Some("chat-completions") | None => match credential.format() {
+            CredentialFormat::ChatgptSubscription => Wire::Responses,
+            CredentialFormat::ApiKey => Wire::ChatCompletions,
+        },
+        Some(other) => {
+            return Err(ConfigError::Invalid(format!(
+                "engine {name} has unknown wire {other}"
+            )))
+        }
+    };
+    RemoteEngine::new(RemoteConfig {
+        name: name.to_string(),
+        provider,
+        base_url,
+        timeout: Duration::from_secs(engine.timeout_secs.unwrap_or(60).max(1)),
+        retries: engine.retries.unwrap_or(2),
+        backoff: Duration::from_millis(engine.backoff_ms.unwrap_or(200)),
+        stream: engine.stream.unwrap_or(matches!(wire, Wire::Responses)),
+        wire,
+        credential,
+    })
+    .map_err(|err| ConfigError::Invalid(err.to_string()))
+}
+
+fn credential_format(
+    engine: &crate::config::EngineConfig,
+    record: Option<&ProviderRecord>,
+) -> CredentialFormat {
+    if engine.wire.as_deref() == Some("responses") {
+        return CredentialFormat::ChatgptSubscription;
+    }
+    match record.map(|record| record.auth) {
+        Some(ProviderAuth::ChatgptSubscription) => CredentialFormat::ChatgptSubscription,
+        _ => CredentialFormat::ApiKey,
     }
 }
 
@@ -189,6 +360,10 @@ impl AppState {
 
     pub fn aliases(&self) -> &BTreeMap<String, AliasSpec> {
         &self.inner.aliases
+    }
+
+    pub fn enabled_providers(&self) -> &BTreeSet<String> {
+        &self.inner.enabled_providers
     }
 
     pub fn engine(&self, name: &str) -> Option<Arc<dyn Engine>> {

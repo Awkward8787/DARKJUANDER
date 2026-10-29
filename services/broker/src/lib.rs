@@ -68,6 +68,8 @@ pub struct ActionRequest {
     pub labels: Labels,
     pub arguments: Value,
     pub route: Option<RouteKind>,
+    /// Set on a resolved cloud route. The broker requires `provider.use:<id>`.
+    pub provider: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,7 +112,19 @@ impl Broker {
             ActionClass::Read | ActionClass::Destructive => principal
                 .file_grant(&request.action, Path::new(&request.target))
                 .is_some(),
-            ActionClass::Model => principal.has_grant(&format!("model.use:{}", request.target)),
+            ActionClass::Model => {
+                let model_ok = principal.has_grant(&format!("model.use:{}", request.target));
+                let provider_ok = match request.route {
+                    Some(RouteKind::Cloud) => match request.provider.as_deref() {
+                        Some(provider) if !provider.is_empty() => {
+                            principal.has_grant(&format!("provider.use:{provider}"))
+                        }
+                        _ => false,
+                    },
+                    _ => true,
+                };
+                model_ok && provider_ok
+            }
             _ => principal.has_grant(&request.action),
         };
         if !granted {
@@ -446,6 +460,7 @@ mod tests {
                     labels,
                     arguments: json!({"to": "attacker@example.com"}),
                     route: None,
+                    provider: None,
                 },
             )
             .unwrap();
@@ -543,5 +558,79 @@ mod tests {
         }
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         exchanger.join().unwrap();
+    }
+
+    #[test]
+    fn resolved_cloud_route_rechecks_the_provider_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let (broker, _signer) = broker(dir.path());
+        let mut who = principal();
+        who.grants.insert("model.use:grok-test".into());
+        let labels = Labels {
+            confidentiality: Confidentiality::Private,
+            ..Labels::user("agent-a")
+        };
+        let denied = broker
+            .authorize(
+                &who,
+                &ActionRequest {
+                    action: "model.use".into(),
+                    target: "grok-test".into(),
+                    labels: labels.clone(),
+                    arguments: json!({"provider": "xai"}),
+                    route: Some(RouteKind::Cloud),
+                    provider: Some("xai".into()),
+                },
+            )
+            .unwrap();
+        assert!(!denied.allowed);
+        assert_eq!(denied.rule_id, "grant");
+
+        who.grants.insert("provider.use:xai".into());
+        let still = broker
+            .authorize(
+                &who,
+                &ActionRequest {
+                    action: "model.use".into(),
+                    target: "grok-test".into(),
+                    labels,
+                    arguments: json!({"provider": "xai"}),
+                    route: Some(RouteKind::Cloud),
+                    provider: Some("xai".into()),
+                },
+            )
+            .unwrap();
+        assert!(!still.allowed);
+        assert_eq!(still.rule_id, "private-data-stays-local");
+
+        let public = broker
+            .authorize(
+                &who,
+                &ActionRequest {
+                    action: "model.use".into(),
+                    target: "grok-test".into(),
+                    labels: Labels::user("agent-a"),
+                    arguments: json!({"provider": "openai"}),
+                    route: Some(RouteKind::Cloud),
+                    provider: Some("openai".into()),
+                },
+            )
+            .unwrap();
+        assert!(!public.allowed);
+        who.grants.insert("provider.use:openai".into());
+        let allowed = broker
+            .authorize(
+                &who,
+                &ActionRequest {
+                    action: "model.use".into(),
+                    target: "grok-test".into(),
+                    labels: Labels::user("agent-a"),
+                    arguments: json!({"provider": "openai"}),
+                    route: Some(RouteKind::Cloud),
+                    provider: Some("openai".into()),
+                },
+            )
+            .unwrap();
+        assert!(allowed.allowed);
     }
 }

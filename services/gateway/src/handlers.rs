@@ -5,14 +5,14 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use dj_audit::Event;
 use dj_broker::{read_mediated_file, ActionRequest};
-use dj_label::Labels;
+use dj_label::{Confidentiality, Labels};
 use dj_policy::RouteKind;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::path::Path;
-use umbra::{decide, RouteInput};
+use umbra::{decide, Location, RouteInput};
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -197,6 +197,7 @@ pub async fn chat(
                 labels: labels.clone(),
                 arguments: json!({}),
                 route: None,
+                provider: None,
             },
         )
         .map_err(internal)?;
@@ -207,6 +208,7 @@ pub async fn chat(
     let psi = state.psi();
     let local_only = state.config().local_only || caller.local_only;
     let granted = granted_models(&caller);
+    let granted_providers = granted_providers(&caller);
     let decision = decide(&RouteInput {
         requested: &request.model,
         models: state.models(),
@@ -218,13 +220,63 @@ pub async fn chat(
         local_only,
         policy: state.policy(),
         granted: Some(&granted),
+        enabled_providers: state.enabled_providers(),
+        granted_providers: &granted_providers,
     })
     .map_err(|err| ApiError::new(StatusCode::FORBIDDEN, err.to_string()))?;
-    if !caller.has_grant(&format!("model.use:{}", decision.selected)) {
+    let provider = state
+        .models()
+        .get(&decision.selected)
+        .and_then(|model| model.provider.clone());
+    let route_kind = match decision.location {
+        Location::Local => RouteKind::Local,
+        Location::Cloud => RouteKind::Cloud,
+    };
+    if decision.location == Location::Cloud
+        && labels.confidentiality.at_least(Confidentiality::Private)
+    {
+        state
+            .audit(Event {
+                kind: "denial".into(),
+                actor: caller.id.clone(),
+                action: "model.route".into(),
+                outcome: "deny".into(),
+                reason: "private or secret data cannot be routed to a cloud model".into(),
+                labels: labels.clone(),
+                details: json!({
+                    "requested": request.model,
+                    "selected": decision.selected,
+                    "provider": provider,
+                }),
+            })
+            .map_err(internal)?;
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
-            format!("capability not granted for model.use:{}", decision.selected),
+            "private or secret data cannot be routed to a cloud model",
         ));
+    }
+    let resolved_authz = state
+        .broker()
+        .authorize(
+            &caller,
+            &ActionRequest {
+                action: "model.use".into(),
+                target: decision.selected.clone(),
+                labels: labels.clone(),
+                arguments: json!({
+                    "provider": provider,
+                    "location": match decision.location {
+                        Location::Local => "local",
+                        Location::Cloud => "cloud",
+                    },
+                }),
+                route: Some(route_kind),
+                provider: provider.clone(),
+            },
+        )
+        .map_err(internal)?;
+    if !resolved_authz.allowed {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, resolved_authz.reason));
     }
 
     state
@@ -259,6 +311,7 @@ pub async fn chat(
                     content: message.content.clone(),
                 })
                 .collect(),
+            confidentiality: Some(labels.confidentiality),
         })
         .map_err(|err| ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()))?;
 
@@ -284,6 +337,7 @@ pub async fn chat(
             labels: output_labels.clone(),
             details: json!({
                 "requested": request.model,
+                "provider": provider,
                 "scorer_preferred": decision.scorer_preferred,
                 "memory_some_avg10": format!("{:.2}", decision.memory_some_avg10),
                 "location": format!("{:?}", decision.location).to_lowercase(),
@@ -311,6 +365,7 @@ pub async fn chat(
             labels: output_labels.clone(),
             details: json!({
                 "engine": decision.engine,
+                "provider": provider,
                 "prompt_tokens": engine_response.prompt_tokens,
                 "completion_tokens": engine_response.completion_tokens,
                 "cache_hit": lookup.hit,
@@ -400,6 +455,7 @@ pub async fn tool(
                 labels: labels.clone(),
                 arguments: body.arguments.clone(),
                 route,
+                provider: None,
             },
         )
         .map_err(internal)?;
@@ -440,6 +496,16 @@ pub async fn tool(
         "span_id": span.id,
         "path": mediated.path,
     })))
+}
+
+fn granted_providers(caller: &dj_broker::Principal) -> BTreeSet<String> {
+    caller
+        .grants
+        .iter()
+        .filter_map(|grant| grant.strip_prefix("provider.use:"))
+        .filter(|id| !id.is_empty())
+        .map(|id| id.to_string())
+        .collect()
 }
 
 fn granted_models(caller: &dj_broker::Principal) -> BTreeSet<String> {
