@@ -20,6 +20,9 @@ Cargo.lock.bak
 *.img
 *.vmdk
 *.vhdx
+*.zst
+*.xz
+/dist
 
 # SELinux build products
 *.mod

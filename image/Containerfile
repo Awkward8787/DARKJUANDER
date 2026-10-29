@@ -1,8 +1,11 @@
 # dj-base
-# Fedora bootc 45 index digest resolved on 2026-10-28. The tag is kept so the
+# Fedora bootc 45 index digest resolved on 2026-10-29. The tag is kept so the
 # line stays readable; the digest is what the build uses. CI builds this
-# image. It has not been booted, and it is not signed.
-FROM quay.io/fedora/fedora-bootc:45@sha256:ed6ebf922c4c63704b1ff7befff74c8d06a5fb74a37b817df3d2cd093568bbc5
+# image with stub binaries and checks the initramfs. The release workflow
+# builds it again with the real binaries. A tag publish can attach a cosign
+# signature; bootc does not enforce it unless you configure that policy.
+# This comment does not claim a boot.
+FROM quay.io/fedora/fedora-bootc:45@sha256:0688bb4fec1318fc2fce52497dd45f84f807f5ea9af1919569801dd05fd6241b
 
 ARG DJ_VERSION=0.1.0
 
@@ -48,6 +51,13 @@ COPY image/sysusers.d/darkjuander.conf /usr/lib/sysusers.d/darkjuander.conf
 COPY image/tmpfiles.d/darkjuander.conf /usr/lib/tmpfiles.d/darkjuander.conf
 COPY image/selinux/ /usr/share/darkjuander/selinux/
 
+# The current bootc-image-builder refuses an image that does not name a
+# root filesystem ("missing required info: DefaultRootFs"). Fedora bootc 45
+# does not ship that field. xfs is the disk default for the release images.
+RUN mkdir -p /usr/lib/bootc/install \
+    && printf '%s\n' '[install.filesystem.root]' 'type = "xfs"' \
+      > /usr/lib/bootc/install/00-darkjuander.toml
+
 # Generate OS rasters from the SVG sources, then install them. GRUB art stays
 # in this tree and is not copied into a bootloader path. bootupd does not
 # read a GRUB theme. None of this has been booted.
@@ -68,7 +78,7 @@ RUN ln -sfn /usr/share/fontconfig/conf.avail/50-darkjuander-inter.conf /etc/font
     && cp -aL /tmp/darkjuander-branding/src/fonts/. /usr/share/fonts/darkjuander/ \
     && cp -aL /tmp/darkjuander-branding/terminal /usr/share/darkjuander/terminal \
     && rm -rf /usr/share/fonts/darkjuander/.instances \
-    && systemctl enable dj-auditd.service umbrad.service nftables.service \
+    && systemctl enable dj-auditd.service umbrad.service nftables.service dj-expire-password.service \
     && bash /tmp/apply-branding.sh \
     && rm -f /tmp/apply-branding.sh \
     && fc-cache -f
@@ -100,7 +110,7 @@ RUN dnf -y remove --setopt=clean_requirements_on_remove=True \
 # (branding/LICENSE-BRAND.md). The OFL fonts keep their own licenses.
 # Fedora packages keep theirs. This image has not been booted.
 LABEL org.opencontainers.image.title="dj-base" \
-      org.opencontainers.image.description="DARKJUANDER hardened bootc image definition. Not booted. Not signed." \
+      org.opencontainers.image.description="DARKJUANDER hardened bootc image. Not booted. A tag publish may attach a cosign signature; bootc does not enforce it by default." \
       org.opencontainers.image.version="${DJ_VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0 AND OFL-1.1 AND LicenseRef-DARKJUANDER-Brand" \
       org.opencontainers.image.source="https://github.com/Awkward8787/DARKJUANDER" \

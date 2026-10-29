@@ -4,8 +4,8 @@ Follow-ups that this PR deliberately did not build. Priority names are the PRD's
 
 ## Still inside Phase 0
 
-- Build `dj-base` with `scripts/build-image.sh` and `scripts/build-disk.sh` on an aarch64 Linux host and boot it in UTM. Record the console and `scripts/check-kernel-config.sh` from inside the guest.
-- Sign the image (BASE-4). cosign is the planned tool. Nothing is signed now.
+- Boot a built `dj-base` disk in UTM on Apple silicon and record the console and `scripts/check-kernel-config.sh` from inside the guest. The release workflow can build the disk. That is not this boot.
+- Sign the bootc image for `bootc` policy (BASE-4). The release workflow can cosign-sign `SHA256SUMS` and, on a tag, the GHCR index. The disk image itself is not signed.
 - Compile and load an SELinux domain for `umbrad` and for agents (BASE-5, SB-4). The draft in `image/selinux/` is not that domain.
 - Boot the image and look at the Plymouth theme and the wallpaper. CI builds the Containerfile and runs `image/check-initramfs.sh`, which requires the theme script path and `Theme=darkjuander` inside the initramfs. That is not a boot. GRUB artwork is not installed, because bootupd's static config does not load a theme. The brand guide's login greeting and status motd stay planned and are not hard-coded.
 
@@ -13,9 +13,9 @@ Follow-ups that this PR deliberately did not build. Priority names are the PRD's
 
 | ID | Left to do |
 |---|---|
-| BASE-1 | CI builds the Containerfile with stub binaries and checks the initramfs. It does not produce a disk or boot it. |
+| BASE-1 | CI builds the Containerfile with stub binaries and checks the initramfs. `.github/workflows/release.yml` builds the release image and disk. A green dry run is a runner log, not a hardware boot. |
 | BASE-3, UP-1, UP-2 | A/B updates and rollback come from bootc and have not been tested on a disk. |
-| BASE-9 | No qcow2 or raw artifact is produced here. |
+| BASE-9 | The release workflow produces a qcow2 (`image` job) and an Anaconda ISO built from that smoke-tested image. The ISO installer is not booted in CI. Both are attached to a GitHub Release only when a `v*` tag is pushed; publish needs the qcow2 image job, not the ISO. |
 | RT-1, RT-2 | llama-server is an adapter and a disabled unit. It is not confined beyond the unit file, and it has not been run against the fetched GGUF in CI. |
 | RT-4 | The router does not refuse a load based on a live RAM estimate. |
 | GW-1 | Chat completions and the models list exist. Streaming and tool-call streaming do not. |

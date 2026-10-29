@@ -1,6 +1,6 @@
 # dj-base
 
-`image/Containerfile` starts from `quay.io/fedora/fedora-bootc:45` pinned by the index digest resolved on 2026-10-28 (`sha256:ed6ebf922c4c63704b1ff7befff74c8d06a5fb74a37b817df3d2cd093568bbc5`). That tag is a manifest list. On that date Quay also had `45-aarch64` and `45-x86_64`. Build on the target architecture. The Containerfile copies the `umbrad` and `dj` binaries you staged, so a macOS `cargo build` must not be copied into the image. The image is not signed.
+`image/Containerfile` starts from `quay.io/fedora/fedora-bootc:45` pinned by the index digest resolved on 2026-10-29 (`sha256:0688bb4fec1318fc2fce52497dd45f84f807f5ea9af1919569801dd05fd6241b`). That tag is a manifest list. On that date Quay also had `45-aarch64` and `45-x86_64`. Build on the target architecture. The Containerfile copies the `umbrad` and `dj` binaries you staged, so a macOS `cargo build` must not be copied into the image. The image is not signed.
 
 What the image definition configures:
 
@@ -25,7 +25,8 @@ What it does not do:
 - It does not sign the image.
 - It does not enroll Secure Boot or seal a LUKS key to a TPM.
 - It does not load `image/selinux/darkjuander.te`.
-- CI builds the Containerfile and checks the initramfs. It does not run `bootc-image-builder`, and it does not boot the result.
+- `.github/workflows/release.yml` builds this image on a `v*` tag and on a dry run. A dry run does not publish a release. A hardware boot is not claimed here.
+- CI builds the Containerfile and checks the initramfs. That job does not run `bootc-image-builder`, and it does not boot the result.
 - The Plymouth theme and the wallpaper have not been seen on a boot. The GRUB artwork is not installed. The pre-login text is the package `/usr/lib/issue`, which prints `PRETTY_NAME` once.
 
 ## Fedora 45 kernel options
