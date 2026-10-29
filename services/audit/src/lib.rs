@@ -44,7 +44,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -202,12 +202,14 @@ impl AuditLog {
             hash: hash.clone(),
         };
         write_record(&inner.file, &record)?;
-        if let Err(err) = commit_checkpoint(
-            &checkpoint_path(&inner.path),
-            &inner.signer,
-            &inner.verifying,
-            &record,
-        ) {
+        if let Err(err) = retry_transient_checkpoint(|| {
+            commit_checkpoint(
+                &checkpoint_path(&inner.path),
+                &inner.signer,
+                &inner.verifying,
+                &record,
+            )
+        }) {
             inner.poisoned = true;
             inner.seq = seq;
             inner.last_hash = hash;
@@ -405,6 +407,52 @@ fn build_record(seq: u64, prev_hash: &str, event: Event) -> Record {
         details: event.details,
         prev_hash: prev_hash.to_string(),
         hash,
+    }
+}
+
+const CHECKPOINT_ATTEMPTS: u32 = 4;
+const CHECKPOINT_RETRY_PAUSE: Duration = Duration::from_millis(20);
+
+/// Retry a checkpoint a few times when the signer is briefly busy or the
+/// socket closes mid-write. A refusal or a bad signature is not retried.
+fn retry_transient_checkpoint(
+    mut op: impl FnMut() -> Result<(), AuditError>,
+) -> Result<(), AuditError> {
+    let mut attempt = 0;
+    loop {
+        match op() {
+            Ok(()) => return Ok(()),
+            Err(err)
+                if is_transient_checkpoint_error(&err) && attempt + 1 < CHECKPOINT_ATTEMPTS =>
+            {
+                attempt += 1;
+                std::thread::sleep(CHECKPOINT_RETRY_PAUSE);
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+fn is_transient_checkpoint_error(err: &AuditError) -> bool {
+    match err {
+        AuditError::Io(io) => {
+            matches!(
+                io.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::Interrupted
+            ) || io.raw_os_error() == Some(libc::ECONNRESET)
+        }
+        AuditError::Corrupt(text) => {
+            text.contains("busy")
+                || text.contains("timed out")
+                || text.contains("closed the socket")
+                || text.contains("Broken pipe")
+                || text.contains("Connection reset")
+        }
+        AuditError::Json(_) => false,
     }
 }
 
@@ -1049,6 +1097,43 @@ mod tests {
             started.elapsed()
         );
         drop(held);
+    }
+
+    #[test]
+    fn checkpoint_retries_a_busy_signer_and_not_a_refusal() {
+        let mut calls = 0;
+        retry_transient_checkpoint(|| {
+            calls += 1;
+            if calls < 3 {
+                Err(AuditError::Corrupt("signer is busy".into()))
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+        assert_eq!(calls, 3);
+
+        calls = 0;
+        let err = retry_transient_checkpoint(|| {
+            calls += 1;
+            Err(AuditError::Corrupt(
+                "refusing record seq 2; signer is at 5".into(),
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(calls, 1);
+        assert!(err.to_string().contains("refusing"), "{err}");
+
+        calls = 0;
+        let err = retry_transient_checkpoint(|| {
+            calls += 1;
+            Err(AuditError::Io(std::io::Error::from_raw_os_error(
+                libc::ECONNRESET,
+            )))
+        })
+        .unwrap_err();
+        assert_eq!(calls, CHECKPOINT_ATTEMPTS);
+        assert!(is_transient_checkpoint_error(&err));
     }
 
     fn transient_signer_error(err: &AuditError) -> bool {
