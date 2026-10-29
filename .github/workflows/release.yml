@@ -22,6 +22,7 @@ on:
     paths:
       - ".github/workflows/release.yml"
       - "scripts/build-release-disk.sh"
+      - "scripts/iso-depsolve.sh"
       - "scripts/package-release-assets.sh"
       - "scripts/smoke-qemu.sh"
       - "scripts/render-release-notes.sh"
@@ -33,9 +34,11 @@ permissions:
   id-token: write
   packages: write
 
+# A new push waits. cancel-in-progress used to kill image (aarch64) in the
+# middle of the QEMU smoke test.
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 defaults:
   run:
