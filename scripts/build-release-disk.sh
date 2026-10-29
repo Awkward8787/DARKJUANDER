@@ -37,12 +37,15 @@ cfg=$(mktemp)
 work=$(mktemp -d)
 trap 'rm -rf "${cfg}" "${work}"' EXIT
 # aarch64 virt (QEMU and UTM) exposes the serial port as ttyAMA0. ttyS0 is
-# the x86 serial device. Without ttyAMA0, the aarch64 console never shows
-# the login prompt the smoke test types into.
+# the x86 UART. The last console= is /dev/console, which is where the login
+# prompt and "Reached target multi-user" are written. tty0 first hides both
+# from the serial log. NetworkManager-wait-online and plymouth block
+# multi-user when the VM has no graphics and no DHCP lease.
 case "$(uname -m)" in
-  aarch64|arm64) console="console=tty0 console=ttyAMA0,115200" ;;
+  aarch64|arm64) console="console=ttyAMA0,115200 earlycon" ;;
   *) console="console=tty0 console=ttyS0,115200" ;;
 esac
+boot_units="systemd.mask=NetworkManager-wait-online.service systemd.mask=plymouth-quit-wait.service systemd.mask=plymouth-start.service"
 cat > "${cfg}" << EOF
 [[customizations.user]]
 name = "dj"
@@ -50,7 +53,7 @@ password = "${password}"
 groups = ["wheel"]
 
 [customizations.kernel]
-append = "${console}"
+append = "${console} ${boot_units}"
 EOF
 
 source_tag=${tag}

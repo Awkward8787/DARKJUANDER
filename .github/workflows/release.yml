@@ -34,11 +34,11 @@ permissions:
   id-token: write
   packages: write
 
-# A new push waits. cancel-in-progress used to kill image (aarch64) in the
-# middle of the QEMU smoke test.
+# A push replaces a run still in progress. The smoke step has its own hard
+# cap, so this does not leave an aarch64 TCG guest running for hours.
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -48,7 +48,7 @@ jobs:
   image:
     name: image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 210
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -58,14 +58,14 @@ jobs:
             platform: linux/arm64
             qemu_pkg: qemu-system-arm
             firmware_pkg: qemu-efi-aarch64
-            # No KVM on the ARM runner. TCG needs a longer boot than x86.
-            smoke_timeout: "7200"
+            # No KVM on this runner. 20 minutes is the hard smoke cap.
+            smoke_timeout: "1200"
           - arch: x86_64
             runner: ubuntu-24.04
             platform: linux/amd64
             qemu_pkg: qemu-system-x86
             firmware_pkg: ovmf
-            smoke_timeout: "2400"
+            smoke_timeout: "600"
     steps:
       - uses: actions/checkout@v4
 

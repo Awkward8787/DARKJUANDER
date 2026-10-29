@@ -32,10 +32,11 @@ accel=tcg
 case "${arch}" in
   aarch64|arm64)
     qemu="qemu-system-aarch64"
-    # cortex-a57 under TCG is slow enough that Fedora never reaches
-    # multi-user inside the job timeout. max is the faster TCG model.
-    # KVM still uses -cpu host below.
-    machine=( -machine virt -cpu max )
+    # GitHub-hosted ARM runners do not expose /dev/kvm (nested virt is not
+    # available on the Azure ARM fleet). cortex-a57 is the small TCG model;
+    # -cpu max emulates SVE and pointer auth and is slower. KVM, when the
+    # device is actually readable, replaces this below.
+    machine=( -machine virt -cpu cortex-a57 -accel "tcg,thread=multi,tb-size=256" )
     firmware=/usr/share/AAVMF/AAVMF_CODE.fd
     if [[ ! -f "${firmware}" ]]; then
       firmware=/usr/share/qemu-efi-aarch64/QEMU_EFI.fd
@@ -65,6 +66,11 @@ if [[ ! -f "${firmware}" ]]; then
   echo "smoke: firmware not found at ${firmware}" | tee "${result}"
   exit 1
 fi
+if [[ -e /dev/kvm ]]; then
+  echo "smoke: /dev/kvm $(stat -c '%A %U:%G' /dev/kvm 2>/dev/null || echo present)"
+else
+  echo "smoke: /dev/kvm absent"
+fi
 if [[ -r /dev/kvm ]]; then
   accel=kvm
   if [[ "${arch}" == "x86_64" ]]; then
@@ -74,11 +80,18 @@ if [[ -r /dev/kvm ]]; then
   fi
 fi
 
-timeout_secs=${SMOKE_TIMEOUT_SECS:-1200}
-echo "smoke: ${qemu} accel=${accel} timeout=${timeout_secs}s image=${image}"
+# Hard cap. The ARM runner has no KVM, so this used to sit in TCG until a
+# two-hour job timeout. The default is short on purpose: a hung guest fails
+# the step instead of occupying the runner.
+timeout_secs=${SMOKE_TIMEOUT_SECS:-600}
+echo "smoke: ${qemu} accel=${accel} timeout=${timeout_secs}s firmware=${firmware} image=${image}"
 
 set +e
-python3 - "${qemu}" "${firmware}" "${image}" "${log}" "${result}" "${password}" "${timeout_secs}" \
+# python enforces the deadline and writes the result file. timeout(1) is the
+# backstop if that process stops checking the clock. It is longer than the
+# deadline so a normal timeout still records multi-user/socket lines.
+timeout --foreground --kill-after=20 "$((timeout_secs + 45))" \
+  python3 - "${qemu}" "${firmware}" "${image}" "${log}" "${result}" "${password}" "${timeout_secs}" \
   "${machine[@]}" -- "${netdev[@]}" << 'PY'
 import os
 import re
@@ -103,10 +116,11 @@ sep = sys.argv.index("--", 8)
 machine = sys.argv[8:sep]
 netdev = sys.argv[sep + 1 :]
 
-# aarch64 GitHub runners have no /dev/kvm, so this boot is TCG. Four cores
-# and 4G match those hosts and get Fedora to multi-user sooner than 2x2G.
-mem = "4096" if "aarch64" in qemu else "2048"
-smp = "4" if "aarch64" in qemu else "2"
+# 2G/2cpu is enough for multi-user and cheaper to emulate than a larger VM.
+# cache=unsafe is smoke-only: the qcow2 is discarded, and the socket check
+# is on a tmpfs. virtio-rng keeps early boot from blocking on the entropy pool.
+mem = "2048"
+smp = "2"
 cmd = [
     qemu,
     *machine,
@@ -117,7 +131,9 @@ cmd = [
     "-drive",
     f"if=pflash,format=raw,readonly=on,file={firmware}",
     "-drive",
-    f"file={image},format=qcow2,if=virtio",
+    f"file={image},format=qcow2,if=virtio,cache=unsafe",
+    "-device",
+    "virtio-rng-pci",
     "-nographic",
     "-serial",
     "mon:stdio",
