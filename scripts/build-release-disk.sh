@@ -28,10 +28,6 @@ name = "dj"
 password = "${password}"
 groups = ["wheel"]
 
-[[customizations.filesystem]]
-mountpoint = "/"
-minsize = "8 GiB"
-
 [customizations.kernel]
 append = "console=tty0 console=ttyS0,115200"
 EOF
