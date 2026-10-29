@@ -23,23 +23,23 @@ Release.
 - `darkjuander-binaries-<version>-<arch>.tar.gz` is `dj`, `umbrad`, and
   `dj-auditd` built for that Linux architecture. Those binaries do not run
   on macOS. The disk image is what you boot.
-- The console user is `dj`. The password is `darkjuander`. It is published
-  in `image/console-password.txt`. It is not a secret. `sshd` is disabled
-  and the guest nftables rules drop inbound connections. Change the
-  password after you log in.
-- The image is not signed. Checksums are in `SHA256SUMS`. A
-  `SHA256SUMS.cosign.bundle` is a keyless signature of that file when the
-  release workflow was able to obtain a GitHub OIDC token.
+- The console user is `dj`. The initial password is `darkjuander`. It is
+  published in `image/console-password.txt`. It is not a secret. The first
+  boot expires it (`chage -d 0`), so the first console login must set a new
+  password before the shell starts. `sshd` is disabled and the guest
+  nftables rules drop inbound connections.
+- Checksums are in `SHA256SUMS`. A `SHA256SUMS.cosign.bundle` is a keyless
+  signature of that file when the publish job could obtain a GitHub OIDC
+  token. The GHCR image is signed the same way on a tag. `bootc` does not
+  enforce that cosign signature unless you configure a policy that does.
 - The qcow2 and the GHCR container leave Fedora's dnf repositories disabled,
   which is how Fedora bootc ships them. Update that system with `bootc
   switch` or `bootc upgrade`, not `dnf update`.
-- The Anaconda ISO is built in a separate CI job (`iso`) from a throwaway
-  image that enables those repositories so the installer can download its
-  own packages. That job does not gate the qcow2 `image` job. A machine
-  installed from the ISO therefore has the Fedora repositories enabled.
-  `dnf` can see Fedora mirrors. That is not the supported update path. A
-  later `bootc switch` or `bootc upgrade` can overwrite or conflict with
-  packages that `dnf` installed.
+- The Anaconda ISO is built from the same container image id that produced
+  the smoke-tested qcow2, plus one layer that enables Fedora dnf repos so
+  the installer can depsolve. A kickstart `%post` turns those repos off
+  again on the installed system. The ISO installer itself is not booted in
+  CI. Treat it as an untested installer. `bootc` remains the update path.
 
 ## 1. Download and check
 
@@ -149,9 +149,10 @@ The ISO is the installer, not a preinstalled disk. In UTM, create an ARM64
 Linux VM, attach `darkjuander-<version>-aarch64.iso` as a USB or CD drive,
 and add an empty VirtIO disk of at least 16 GB. Boot the ISO, accept the
 install onto the empty disk, shut down, remove the ISO, and boot the disk.
-The installed system is the same image as the qcow2 path: user `dj`,
-published password, no SSH. This ISO install has not been walked through on
-hardware.
+The installed system is the smoke-tested container with Fedora dnf repos
+turned back off by the kickstart. User `dj` must set a new password at the
+first console login. There is no SSH. This ISO has not been booted in CI
+and has not been walked through on hardware.
 
 ## 6. `bootc switch`
 
@@ -170,6 +171,14 @@ by `bootc switch`. The disk image's console user is applied by
 bootc-image-builder and is not part of the container, so `bootc switch` does
 not create user `dj`.
 
-`bootc switch` can refuse an unsigned image. This image is not signed.
-Checksum signatures do not satisfy that check. Do not disable signature
-policy to get past the refusal unless that is a decision you mean to make.
+A tag publish signs the GHCR image with keyless cosign. `bootc switch` uses
+bootc's own policy, which does not check that cosign signature unless you
+configure it to. Do not disable signature policy to get past a refusal
+unless that is a decision you mean to make.
+
+```bash
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "https://github.com/Awkward8787/DARKJUANDER/.github/workflows/release.yml@refs/tags/vX.Y.Z" \
+  ghcr.io/awkward8787/darkjuander:vX.Y.Z
+```

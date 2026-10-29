@@ -90,8 +90,12 @@ set +e
 # python enforces the deadline and writes the result file. timeout(1) is the
 # backstop if that process stops checking the clock. It is longer than the
 # deadline so a normal timeout still records multi-user/socket lines.
+export SMOKE_LIB="${root}/scripts"
+# First-login password chosen only inside this VM. The shipped default is
+# expired by dj-expire-password.service, so the guest asks for a new one.
+smoke_new_password=${SMOKE_NEW_PASSWORD:-Dj-Console-9k}
 timeout --foreground --kill-after=20 "$((timeout_secs + 45))" \
-  python3 - "${qemu}" "${firmware}" "${image}" "${log}" "${result}" "${password}" "${timeout_secs}" \
+  python3 - "${qemu}" "${firmware}" "${image}" "${log}" "${result}" "${password}" "${timeout_secs}" "${smoke_new_password}" \
   "${machine[@]}" -- "${netdev[@]}" << 'PY'
 import os
 import re
@@ -99,6 +103,9 @@ import selectors
 import subprocess
 import sys
 import time
+
+sys.path.insert(0, os.environ["SMOKE_LIB"])
+from smoke_marker import LoginDriver, socket_ok as marker_ok
 
 # systemd colors the console, so "Reached target multi-user.target" is not
 # contiguous bytes. Match the phrase after stripping those sequences.
@@ -111,10 +118,12 @@ log_path = sys.argv[4]
 result_path = sys.argv[5]
 password = sys.argv[6]
 timeout = int(sys.argv[7])
+new_password = sys.argv[8]
 # argv after the fixed fields: machine... -- netdev...
-sep = sys.argv.index("--", 8)
-machine = sys.argv[8:sep]
+sep = sys.argv.index("--", 9)
+machine = sys.argv[9:sep]
 netdev = sys.argv[sep + 1 :]
+login = LoginDriver(password, new_password)
 
 # 2G/2cpu is enough for multi-user and cheaper to emulate than a larger VM.
 # cache=unsafe is smoke-only: the qcow2 is discarded, and the socket check
@@ -151,9 +160,6 @@ sel = selectors.DefaultSelector()
 sel.register(proc.stdout, selectors.EVENT_READ)
 log = open(log_path, "wb")
 buf = b""
-sent_user = False
-sent_pass = False
-sent_cmd = False
 multi = False
 socket_ok = False
 deadline = time.time() + timeout
@@ -173,28 +179,13 @@ try:
             log.flush()
             buf += chunk
             text = ANSI.sub("", buf.decode("utf-8", "replace"))
-            tail = text[-400:]
             if "Reached target multi-user.target" in text or "Multi-User System" in text:
                 multi = True
-            if (not sent_user) and "login:" in tail:
-                proc.stdin.write(b"dj\n")
+            typed = login.on_text(text)
+            if typed:
+                proc.stdin.write(typed)
                 proc.stdin.flush()
-                sent_user = True
-            if sent_user and (not sent_pass) and "assword:" in tail:
-                proc.stdin.write(password.encode() + b"\n")
-                proc.stdin.flush()
-                sent_pass = True
-            if sent_pass and (not sent_cmd) and ("~]$" in tail or "~]#" in tail):
-                cmd_line = (
-                    "echo "
-                    + password
-                    + " | sudo -S -p '' test -S /run/darkjuander/umbrad.sock"
-                    + " && echo UMBRAD_SOCKET_OK\n"
-                )
-                proc.stdin.write(cmd_line.encode())
-                proc.stdin.flush()
-                sent_cmd = True
-            if "UMBRAD_SOCKET_OK" in text:
+            if marker_ok(text):
                 socket_ok = True
         if socket_ok:
             break
@@ -210,7 +201,7 @@ finally:
 lines = [
     f"multi-user: {'yes' if multi else 'no'}",
     f"umbrad-socket: {'yes' if socket_ok else 'no'}",
-    f"login-reached: {'yes' if sent_user else 'no'}",
+    f"login-reached: {'yes' if login.sent_user else 'no'}",
 ]
 text = "\n".join(lines) + "\n"
 sys.stderr.write(text)

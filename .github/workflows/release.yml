@@ -1,18 +1,18 @@
 # Build installable DARKJUANDER images.
 #
-# A v* tag publishes a GitHub Release and pushes
+# A v* tag push publishes a GitHub Release and pushes
 # ghcr.io/awkward8787/darkjuander:<tag> plus :latest.
-# workflow_dispatch and pull_request runs are dry runs: workflow artifacts
-# only, no Release, no GHCR push. pull_request is how a change to this
-# file is proven before it is on the default branch. GitHub does not offer
-# workflow_dispatch for a workflow that exists only on a feature branch.
+# workflow_dispatch defaults to a dry run. Set the dry_run input to false
+# on a v* tag ref to publish from a manual run. pull_request runs are
+# always dry runs: workflow artifacts only. pull_request is how a change
+# to this file is proven before it is on the default branch.
 name: release
 
 on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: A v* tag is what publishes. This input does not publish from a branch.
+        description: Publish only when this is false and the ref is a v* tag. Default is a dry run.
         type: boolean
         default: true
   push:
@@ -24,15 +24,17 @@ on:
       - "scripts/build-release-disk.sh"
       - "scripts/iso-depsolve.sh"
       - "scripts/package-release-assets.sh"
+      - "scripts/release-version.sh"
       - "scripts/smoke-qemu.sh"
+      - "scripts/smoke_marker.py"
+      - "scripts/write-disk-config.py"
       - "scripts/render-release-notes.sh"
       - "image/Containerfile"
       - "image/console-password.txt"
+      - "image/systemd/dj-expire-password.service"
 
 permissions:
   contents: read
-  id-token: write
-  packages: write
 
 # A push replaces a run still in progress. The smoke step has its own hard
 # cap, so this does not leave an aarch64 TCG guest running for hours.
@@ -49,6 +51,8 @@ jobs:
     name: image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -67,92 +71,82 @@ jobs:
             firmware_pkg: ovmf
             smoke_timeout: "600"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: free runner disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
           df -h
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: 1.99.1
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          lookup-only: true
 
       - name: version
         id: ver
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/}" >> "${GITHUB_OUTPUT}"
-            echo "publish=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "version=0.0.0-dry.${GITHUB_SHA:0:12}" >> "${GITHUB_OUTPUT}"
-            echo "publish=false" >> "${GITHUB_OUTPUT}"
-          fi
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: ./scripts/release-version.sh
 
       - name: install image tools
+        env:
+          QEMU_PKG: ${{ matrix.qemu_pkg }}
+          FIRMWARE_PKG: ${{ matrix.firmware_pkg }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman zstd "${{ matrix.qemu_pkg }}" "${{ matrix.firmware_pkg }}"
+          sudo apt-get install -y podman zstd "${QEMU_PKG}" "${FIRMWARE_PKG}"
 
       - name: binaries
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          ARCH: ${{ matrix.arch }}
         run: |
           cargo build --workspace --release --locked
           mkdir -p out/stage dist/payload
           install -m 0755 target/release/umbrad out/stage/umbrad
           install -m 0755 target/release/dj out/stage/dj
           install -m 0755 target/release/dj-auditd out/stage/dj-auditd
-          tar -C out/stage -czf "dist/payload/darkjuander-binaries-${{ steps.ver.outputs.version }}-${{ matrix.arch }}.tar.gz" \
+          tar -C out/stage -czf "dist/payload/darkjuander-binaries-${VERSION}-${ARCH}.tar.gz" \
             umbrad dj dj-auditd
 
       - name: bootc image
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           sudo podman build \
-            --platform "${{ matrix.platform }}" \
-            --build-arg "DJ_VERSION=${{ steps.ver.outputs.version }}" \
+            --platform "${PLATFORM}" \
+            --build-arg "DJ_VERSION=${VERSION}" \
             -f image/Containerfile \
-            -t "localhost/dj-base:${{ steps.ver.outputs.version }}" \
+            -t "localhost/dj-base:${VERSION}" \
             .
 
       - name: qcow2
         id: qcow2
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          ARCH: ${{ matrix.arch }}
         run: |
           ./scripts/build-release-disk.sh \
-            "localhost/dj-base:${{ steps.ver.outputs.version }}" \
+            "localhost/dj-base:${VERSION}" \
             out/disk qcow2
           mkdir -p dist/payload
-          ver="${{ steps.ver.outputs.version }}"
-          arch="${{ matrix.arch }}"
           mapfile -t qcows < <(find out/disk/qcow2 -type f -name '*.qcow2')
           test "${#qcows[@]}" -ge 1
-          zstd -T0 -15 -f "${qcows[0]}" -o "dist/payload/darkjuander-${ver}-${arch}.qcow2.zst"
+          zstd -T0 -15 -f "${qcows[0]}" -o "dist/payload/darkjuander-${VERSION}-${ARCH}.qcow2.zst"
           cp -f "${qcows[0]}" dist/smoke.qcow2
           mapfile -t files < <(find dist/payload -type f | sort)
           ./scripts/package-release-assets.sh dist/release "${files[@]}"
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
-        continue-on-error: true
-        with:
-          cosign-release: v2.5.3
-
-      - name: sign SHA256SUMS
-        id: sign
-        if: steps.qcow2.outcome == 'success'
-        continue-on-error: true
-        run: |
-          if ! command -v cosign >/dev/null; then
-            echo "cosign is not installed; SHA256SUMS is unsigned" | tee dist/release/COSIGN.txt
-            exit 1
-          fi
-          cosign sign-blob --yes \
-            --bundle dist/release/SHA256SUMS.cosign.bundle \
-            dist/release/SHA256SUMS
-          echo "cosign keyless signed SHA256SUMS" | tee dist/release/COSIGN.txt
-
       - name: upload qcow2
         if: steps.qcow2.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: darkjuander-${{ matrix.arch }}
           if-no-files-found: error
@@ -167,7 +161,7 @@ jobs:
 
       - name: upload smoke log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: darkjuander-smoke-${{ matrix.arch }}
           if-no-files-found: warn
@@ -175,19 +169,35 @@ jobs:
             dist/smoke.qcow2.serial.log
             dist/smoke.qcow2.smoke.txt
 
-      - name: push arch image
-        if: steps.ver.outputs.publish == 'true' && steps.smoke.outcome == 'success'
+      - name: export smoke-tested image
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          remote="ghcr.io/awkward8787/darkjuander:${{ steps.ver.outputs.version }}-${{ matrix.arch }}"
-          sudo podman tag "localhost/dj-base:${{ steps.ver.outputs.version }}" "${remote}"
-          sudo podman push "${remote}"
+          rm -f dist/smoke.qcow2
+          rm -rf out/disk dist/payload
+          mkdir -p dist/container
+          sudo podman save -o dist/container/dj-base.tar "localhost/dj-base:${VERSION}"
+          sudo chown "$(id -u):$(id -g)" dist/container/dj-base.tar
+          sudo podman image inspect --format '{{.Id}}' "localhost/dj-base:${VERSION}" \
+            | tee dist/container/image-id.txt
+          printf '%s\n' "${VERSION}" > dist/container/version.txt
+
+      - name: upload container
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: darkjuander-container-${{ matrix.arch }}
+          if-no-files-found: error
+          path: dist/container/**
 
       - name: job summary
         if: always()
+        env:
+          ARCH: ${{ matrix.arch }}
+          QCOW_OUTCOME: ${{ steps.qcow2.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
         run: |
           {
-            echo "### image ${{ matrix.arch }}"
+            echo "### image ${ARCH}"
             echo
             echo '```'
             find dist -type f -printf '%s\t%p\n' 2>/dev/null | sort -k2 || true
@@ -200,100 +210,82 @@ jobs:
             else
               echo "No smoke result file."
             fi
-            if [[ -f dist/release/COSIGN.txt ]]; then
-              echo
-              echo '```'
-              cat dist/release/COSIGN.txt
-              echo '```'
-            fi
             echo
-            echo "qcow2 step: ${{ steps.qcow2.outcome }}"
-            echo "smoke step: ${{ steps.smoke.outcome }}"
+            echo "qcow2 step: ${QCOW_OUTCOME}"
+            echo "smoke step: ${SMOKE_OUTCOME}"
             echo
-            echo "Primary release artifact is the qcow2. Fedora dnf repos stay disabled in the qcow2 and GHCR image. Anaconda ISO is a separate job (iso)."
+            echo "Primary release artifact is the qcow2. Fedora dnf repos stay disabled in the qcow2 and GHCR image. The iso job loads this container archive."
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # Anaconda ISO is a separate check from the qcow2 image job. It rebuilds
-  # the bootc image and runs bootc-image-builder with a throwaway depsolve
-  # layer. Failure here is visible as job "iso (arch)" and does not fail
-  # "image (arch)" or block the publish job, which only needs image.
+  # Loads the container the image job smoke-tested. Does not rebuild it.
   iso:
     name: iso (${{ matrix.arch }})
+    needs: image
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: aarch64
             runner: ubuntu-24.04-arm
-            platform: linux/arm64
           - arch: x86_64
             runner: ubuntu-24.04
-            platform: linux/amd64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: free runner disk
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
           df -h
 
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.1
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: version
-        id: ver
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/}" >> "${GITHUB_OUTPUT}"
-          else
-            echo "version=0.0.0-dry.${GITHUB_SHA:0:12}" >> "${GITHUB_OUTPUT}"
-          fi
-
       - name: install image tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman zstd
+          sudo apt-get install -y podman zstd openssl
 
-      - name: binaries
-        run: |
-          cargo build --workspace --release --locked
-          mkdir -p out/stage
-          install -m 0755 target/release/umbrad out/stage/umbrad
-          install -m 0755 target/release/dj out/stage/dj
-          install -m 0755 target/release/dj-auditd out/stage/dj-auditd
-
-      - name: bootc image
-        run: |
-          sudo podman build \
-            --platform "${{ matrix.platform }}" \
-            --build-arg "DJ_VERSION=${{ steps.ver.outputs.version }}" \
-            -f image/Containerfile \
-            -t "localhost/dj-base:${{ steps.ver.outputs.version }}" \
-            .
+      - name: download smoke-tested image
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: darkjuander-container-${{ matrix.arch }}
+          path: dist/container
 
       - name: anaconda iso
         id: iso
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
+          ver=$(tr -d '\r\n' < dist/container/version.txt)
+          want=$(tr -d '\r\n' < dist/container/image-id.txt)
+          tag_re='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+          dry_re='^0\.0\.0-dry\.[0-9a-f]{12}$'
+          if [[ ! "${ver}" =~ ${tag_re} && ! "${ver}" =~ ${dry_re} ]]; then
+            echo "refusing container version" >&2
+            exit 1
+          fi
+          sudo podman load -i dist/container/dj-base.tar
+          got=$(sudo podman image inspect --format '{{.Id}}' "localhost/dj-base:${ver}")
+          if [[ "${got}" != "${want}" ]]; then
+            echo "loaded image id ${got} does not match smoke-tested ${want}" >&2
+            exit 1
+          fi
           ./scripts/build-release-disk.sh \
-            "localhost/dj-base:${{ steps.ver.outputs.version }}" \
+            "localhost/dj-base:${ver}" \
             out/disk anaconda-iso
           mkdir -p dist/iso-payload
-          ver="${{ steps.ver.outputs.version }}"
-          arch="${{ matrix.arch }}"
           mapfile -t isos < <(find out/disk/anaconda-iso -type f -name '*.iso')
           test "${#isos[@]}" -ge 1
-          zstd -T0 -15 -f "${isos[0]}" -o "dist/iso-payload/darkjuander-${ver}-${arch}.iso.zst"
+          zstd -T0 -15 -f "${isos[0]}" -o "dist/iso-payload/darkjuander-${ver}-${ARCH}.iso.zst"
           mapfile -t files < <(find dist/iso-payload -type f | sort)
           ./scripts/package-release-assets.sh dist/iso-release "${files[@]}"
 
       - name: upload iso
         if: steps.iso.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: darkjuander-iso-${{ matrix.arch }}
           if-no-files-found: error
@@ -301,36 +293,55 @@ jobs:
 
       - name: job summary
         if: always()
+        env:
+          ARCH: ${{ matrix.arch }}
+          ISO_OUTCOME: ${{ steps.iso.outcome }}
         run: |
           {
-            echo "### iso ${{ matrix.arch }}"
+            echo "### iso ${ARCH}"
             echo
             echo '```'
             find dist -type f -printf '%s\t%p\n' 2>/dev/null | sort -k2 || true
             echo '```'
             echo
-            echo "iso step: ${{ steps.iso.outcome }}"
+            echo "iso step: ${ISO_OUTCOME}"
             echo
-            echo "This job is the Anaconda installer ISO only. It does not gate the qcow2 image job or the publish release job. The ISO is built from a throwaway image with Fedora dnf repos enabled for installer depsolve; a system installed from the ISO has those repos enabled. bootc remains the update path."
+            echo "This ISO is built from the smoke-tested container archive. It is not booted in CI. A kickstart post script disables Fedora dnf repos on the installed system."
           } >> "${GITHUB_STEP_SUMMARY}"
 
   publish:
     name: publish release
-    needs: image
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [image, iso]
+    # iso is allowed to fail without blocking the qcow2 release. Waiting for
+    # it still lets a successful ISO artifact be attached. A bad tag name is
+    # rejected by scripts/release-version.sh before it reaches a shell step.
+    if: >-
+      always() &&
+      needs.image.result == 'success' &&
+      (needs.iso.result == 'success' || needs.iso.result == 'failure' || needs.iso.result == 'skipped') &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      (github.event_name != 'workflow_dispatch' || inputs.dry_run == false)
     runs-on: ubuntu-24.04
     permissions:
       contents: write
       id-token: write
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: version
+        id: ver
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: ./scripts/release-version.sh
 
       - name: install tools
         run: sudo apt-get update && sudo apt-get install -y podman
 
       - name: download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: darkjuander-*
           path: dist/parts
@@ -355,7 +366,7 @@ jobs:
           fi
           ./scripts/render-release-notes.sh "${GITHUB_REF#refs/tags/}" "${smoke}" > dist/out/RELEASE_NOTES.md
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v2.5.3
         with:
           cosign-release: v2.5.3
 
@@ -366,28 +377,48 @@ jobs:
             dist/out/SHA256SUMS
 
       - name: push multi-arch index
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
-          ver="${GITHUB_REF#refs/tags/}"
-          sudo podman manifest create "localhost/darkjuander:${ver}"
-          sudo podman manifest add "localhost/darkjuander:${ver}" \
-            "docker://ghcr.io/awkward8787/darkjuander:${ver}-aarch64"
-          sudo podman manifest add "localhost/darkjuander:${ver}" \
-            "docker://ghcr.io/awkward8787/darkjuander:${ver}-x86_64"
-          sudo podman manifest push --all "localhost/darkjuander:${ver}" \
-            "docker://ghcr.io/awkward8787/darkjuander:${ver}"
+          printf '%s\n' "${GH_TOKEN}" | sudo podman login ghcr.io -u "${GH_ACTOR}" --password-stdin
+          mapfile -t tars < <(find dist/parts -name dj-base.tar | sort)
+          test "${#tars[@]}" -eq 2
+          for tar in "${tars[@]}"; do
+            dir=$(dirname "${tar}")
+            ver=$(tr -d '\r\n' < "${dir}/version.txt")
+            want=$(tr -d '\r\n' < "${dir}/image-id.txt")
+            test "${ver}" = "${VERSION}"
+            base=$(basename "${dir}")
+            arch=${base#darkjuander-container-}
+            sudo podman rmi "localhost/dj-base:${ver}" >/dev/null 2>&1 || true
+            sudo podman load -i "${tar}"
+            got=$(sudo podman image inspect --format '{{.Id}}' "localhost/dj-base:${ver}")
+            test "${got}" = "${want}"
+            remote="ghcr.io/awkward8787/darkjuander:${ver}-${arch}"
+            sudo podman tag "localhost/dj-base:${ver}" "${remote}"
+            sudo podman push "${remote}"
+          done
+          sudo podman manifest create "localhost/darkjuander:${VERSION}"
+          sudo podman manifest add "localhost/darkjuander:${VERSION}" \
+            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-aarch64"
+          sudo podman manifest add "localhost/darkjuander:${VERSION}" \
+            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-x86_64"
+          sudo podman manifest push --all "localhost/darkjuander:${VERSION}" \
+            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}"
           sudo podman manifest create "localhost/darkjuander-latest"
           sudo podman manifest add "localhost/darkjuander-latest" \
-            "docker://ghcr.io/awkward8787/darkjuander:${ver}-aarch64"
+            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-aarch64"
           sudo podman manifest add "localhost/darkjuander-latest" \
-            "docker://ghcr.io/awkward8787/darkjuander:${ver}-x86_64"
+            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-x86_64"
           sudo podman manifest push --all "localhost/darkjuander-latest" \
             "docker://ghcr.io/awkward8787/darkjuander:latest"
-          cosign sign --yes "ghcr.io/awkward8787/darkjuander:${ver}"
+          cosign sign --yes "ghcr.io/awkward8787/darkjuander:${VERSION}"
           cosign sign --yes "ghcr.io/awkward8787/darkjuander:latest"
 
       - name: github release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           body_path: dist/out/RELEASE_NOTES.md
           files: dist/out/*

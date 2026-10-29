@@ -14,7 +14,7 @@ Follow-ups that this PR deliberately did not build. Priority names are the PRD's
 |---|---|
 | BASE-1 | Pull-request CI lints the Containerfile and does not build it. `.github/workflows/release.yml` builds it. A green dry run is a runner log, not a standing claim in this table. |
 | BASE-3, UP-1, UP-2 | A/B updates and rollback come from bootc and have not been tested on a disk. |
-| BASE-9 | The release workflow produces a qcow2 (`image` job) and an Anaconda ISO (`iso` job, separate check). They are attached to a GitHub Release only when a `v*` tag is pushed; publish needs the qcow2 image job, not the ISO. |
+| BASE-9 | The release workflow produces a qcow2 (`image` job) and an Anaconda ISO built from that smoke-tested image. The ISO installer is not booted in CI. Both are attached to a GitHub Release only when a `v*` tag is pushed; publish needs the qcow2 image job, not the ISO. |
 | RT-1, RT-2 | llama-server is an adapter and a disabled unit. It is not confined beyond the unit file, and it has not been run against the fetched GGUF in CI. |
 | RT-4 | The router does not refuse a load based on a live RAM estimate. |
 | GW-1 | Chat completions and the models list exist. Streaming and tool-call streaming do not. |

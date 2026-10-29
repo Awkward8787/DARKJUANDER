@@ -12,21 +12,21 @@ uploads workflow artifacts and does not publish a release or move `:latest`.
   is a serial-console boot of that disk. It is not a UTM install.
 - Secure Boot is not enrolled. The disk is not signed. LUKS is not sealed
   to a TPM.
-- cosign keyless, when the workflow could get a GitHub OIDC token, signs
-  `SHA256SUMS` only. That is not a signature on the bootc image itself.
-  `bootc switch` may refuse an unsigned image. Do not turn signature
-  checking off on a machine you depend on unless you accept that.
-- The console user `dj` uses the published password `darkjuander`. It is not
-  a secret. `sshd` is disabled and inbound connections are dropped. Change
-  the password with `passwd` before you add a network path you do not control.
+- The publish job signs `SHA256SUMS` and
+  `ghcr.io/awkward8787/darkjuander:__VERSION__` with keyless cosign.
+  `bootc switch` does not enforce that signature unless a policy says so.
+  Do not turn signature checking off on a machine you depend on unless you
+  accept that.
+- The console user `dj` starts from the published password `darkjuander`.
+  It is not a secret, and first boot expires it. The first console login
+  must set a new password. `sshd` is disabled and inbound connections are
+  dropped.
 - The qcow2 and `ghcr.io/awkward8787/darkjuander` leave Fedora's dnf
   repositories disabled. Update those systems with `bootc`, not `dnf update`.
-- The Anaconda ISO is built in a separate CI job (`iso`) from a throwaway
-  image that enables those repositories so the installer can depsolve. That
-  job does not gate the qcow2 `image` job. A system installed from the ISO
-  has the Fedora repositories enabled. `dnf` can then see Fedora mirrors.
-  That is not the supported update path. Packages installed with `dnf` can
-  conflict with a later `bootc switch` or `bootc upgrade`.
+- The Anaconda ISO is the smoke-tested container plus a depsolve layer.
+  The kickstart disables Fedora dnf repos on the installed system. The ISO
+  installer was not booted in CI. It is an untested installer. Packages
+  installed later with `dnf` can still conflict with `bootc switch`.
 - Runner smoke result for this build:
 
 ```
@@ -57,6 +57,15 @@ cosign verify-blob \
 
 If the bundle is absent, keyless signing did not run. The checksum file is
 then only as trustworthy as the GitHub Release that hosts it.
+
+The container tag is signed when this file is attached to a GitHub Release:
+
+```bash
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "https://github.com/Awkward8787/DARKJUANDER/.github/workflows/release.yml@refs/tags/__VERSION__" \
+  ghcr.io/awkward8787/darkjuander:__VERSION__
+```
 
 ## Install
 

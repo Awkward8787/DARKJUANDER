@@ -50,15 +50,8 @@ esac
 # emergency mode with a locked root shell. A longer timeout does not delay
 # a fast boot; it only lets a slow one finish.
 boot_units="systemd.default_device_timeout_sec=300 systemd.default_timeout_start_sec=300 systemd.mask=NetworkManager-wait-online.service systemd.mask=plymouth-quit-wait.service systemd.mask=plymouth-start.service"
-cat > "${cfg}" << EOF
-[[customizations.user]]
-name = "dj"
-password = "${password}"
-groups = ["wheel"]
-
-[customizations.kernel]
-append = "${console} ${boot_units}"
-EOF
+python3 "${root}/scripts/write-disk-config.py" \
+  "${image_type}" "${password}" "${console}" "${boot_units}" "${cfg}"
 
 source_tag=${tag}
 if [[ "${image_type}" == "anaconda-iso" ]]; then
