@@ -44,6 +44,8 @@ jobs:
           ./scripts/test-cosign-ghcr-auth-check.sh
           ./scripts/test-assert-cosign-docker-config.sh
           ./scripts/test-cosign-ci-probe.sh
+          ./scripts/test-highest-release-tag.sh
+          ./scripts/test-assert-index-children.sh
       - name: containerfile and kernel-config script
         run: |
           ./scripts/check-containerfile.sh

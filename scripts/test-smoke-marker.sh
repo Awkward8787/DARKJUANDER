@@ -8,6 +8,7 @@ import sys
 sys.path.insert(0, sys.argv[1] + "/scripts")
 from smoke_marker import (
     LoginDriver,
+    expiry_proven,
     multi_user_ok,
     password_expired,
     probe_command,
@@ -47,5 +48,52 @@ if password_expired(plain):
 forced = plain + "You are required to change your password immediately (administrator enforced).\n"
 if not password_expired(forced):
     raise SystemExit("the forced password change must count")
+
+
+def drive(chunks, old="darkjuander", new="Dj-Console-9k"):
+    guest = LoginDriver(old, new)
+    buf = ""
+    sent_new = False
+    for chunk in chunks:
+        buf += chunk
+        typed = guest.on_text(buf)
+        if (
+            typed
+            and guest.sent_retype
+            and guest.sent_cmd
+            and new.encode() in typed
+        ):
+            sent_new = True
+    accepted = sent_new and socket_ok(buf)
+    return expiry_proven(buf, guest.sent_retype, accepted)
+
+
+# chage -l prints this on an account that is already expired, and a
+# non-expired guest can print the same line. The phrase is not the proof.
+chage = "Last password change\t\t\t: password must be changed\n"
+hostile = [
+    "darkjuander login: ",
+    "Password: ",
+    chage,
+    "[dj@darkjuander ~]$ ",
+    "MULTI_USER_OK\nUMBRAD_SOCKET_OK\n",
+]
+if not password_expired("".join(hostile)):
+    raise SystemExit("the chage line is the phrase the old check trusted")
+if drive(hostile):
+    raise SystemExit("a non-expired guest printing the chage line must fail")
+
+changed = [
+    "darkjuander login: ",
+    "Password: ",
+    "You are required to change your password immediately (administrator enforced).\n",
+    "Current password: ",
+    "New password: ",
+    "Retype new password: ",
+    "[dj@darkjuander ~]$ ",
+    "MULTI_USER_OK\nUMBRAD_SOCKET_OK\n",
+]
+if not drive(changed):
+    raise SystemExit("a finished change that sudo accepts must pass")
 print("smoke-marker: ok")
 PY

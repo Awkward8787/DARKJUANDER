@@ -77,7 +77,7 @@ When the release includes a cosign bundle:
 cosign verify-blob \
   --bundle SHA256SUMS.cosign.bundle \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/Awkward8787/DARKJUANDER/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-identity-regexp '^https://github.com/Awkward8787/DARKJUANDER/\.github/workflows/release\.yml@refs/tags/v' \
   SHA256SUMS
 ```
 
@@ -165,12 +165,19 @@ sudo bootc switch ghcr.io/awkward8787/darkjuander:vX.Y.Z
 sudo systemctl reboot
 ```
 
-`:latest` moves on every tagged release. Pin the version tag. The container
-is pushed to GHCR only when a tag is built, not on a dry run. The package
-may be private until it is made public; a private package cannot be pulled
-by `bootc switch`. The disk image's console user is applied by
-bootc-image-builder and is not part of the container, so `bootc switch` does
-not create user `dj`.
+`:latest` moves when the tag being published is the highest `v*` semver
+tag in the repository. An older tag does not move it backwards. Pin the
+version tag. The container is pushed to GHCR only when a tag is built, not
+on a dry run. The package may be private until it is made public; a private
+package cannot be pulled by `bootc switch`. The disk image's console user
+is applied by bootc-image-builder and is not part of the container, so
+`bootc switch` does not create user `dj`.
+
+Tags named `ci-<run id>`, `ci-<run id>-aarch64`, and `ci-<run id>-x86_64`
+are internal staging names from the publish job. Do not `bootc switch` to
+them. A failed publish can leave those tags unsigned. They stay in the
+package: a GHCR package version is a digest, and deleting it would also
+remove any release tag that points at the same digest.
 
 `v0.1.0` and the `:latest` tag that was published with it both point at
 `ghcr.io/awkward8787/darkjuander@sha256:a28c4d2f17fc3f02cdd59463641fbc875f240ba3e581de733016627613502009`.
@@ -178,7 +185,7 @@ That image is unsigned. No newer tag has been published. Do not `bootc switch`
 to `v0.1.0` or to `:latest` until a later tag exists and its release notes
 say that tag's digest was signed.
 
-A tag publish after this fix signs the GHCR image with keyless cosign. `bootc switch`
+A tag publish after v0.1.0 signs the GHCR image with keyless cosign. `bootc switch`
 uses bootc's own policy, which does not check that cosign signature unless
 you configure it to. Do not disable signature policy to get past a refusal
 unless that is a decision you mean to make.

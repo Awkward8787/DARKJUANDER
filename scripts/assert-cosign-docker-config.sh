@@ -27,7 +27,15 @@ helpers = data.get("credHelpers") or {}
 if isinstance(helpers, dict) and "ghcr.io" in helpers:
     sys.stderr.write("docker config sets credHelpers for ghcr.io\n")
     raise SystemExit(1)
-auth = data.get("auths", {}).get("ghcr.io", {}).get("auth", "")
+auths = data.get("auths", {})
+if not isinstance(auths, dict):
+    sys.stderr.write("docker config auths is not an object\n")
+    raise SystemExit(1)
+entry = auths.get("ghcr.io")
+if not isinstance(entry, dict):
+    sys.stderr.write("docker config has no ghcr.io auth entry\n")
+    raise SystemExit(1)
+auth = entry.get("auth", "")
 if not isinstance(auth, str) or auth.strip() == "":
     sys.stderr.write("docker config has no ghcr.io auth entry\n")
     raise SystemExit(1)
@@ -42,7 +50,7 @@ except UnicodeDecodeError:
     sys.stderr.write("ghcr.io auth entry is not a user:token string\n")
     raise SystemExit(1)
 user, sep, secret = text.partition(":")
-if sep != ":" or user == "" or secret == "":
+if sep != ":" or user.strip() == "" or secret.strip() == "":
     sys.stderr.write("ghcr.io auth entry must be base64 of user:token\n")
     raise SystemExit(1)
 PY

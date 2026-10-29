@@ -422,6 +422,11 @@ jobs:
             "localhost/darkjuander:${stage}" \
             "docker://ghcr.io/awkward8787/darkjuander:${stage}"
           grep -Eq '^sha256:[0-9a-f]{64}$' dist/index.digest
+          index=$(tr -d '\r\n' < dist/index.digest)
+          sudo skopeo inspect --raw \
+            "docker://ghcr.io/awkward8787/darkjuander@${index}" > dist/index.raw
+          python3 ./scripts/assert-index-children.py dist/index.raw \
+            dist/aarch64.digest dist/x86_64.digest
 
       # sudo podman login stores credentials in root's containers auth file.
       # cosign runs as the runner user and reads the docker config instead.
@@ -473,9 +478,36 @@ jobs:
             echo "version tag digest ${tagged} is not the signed digest ${index}" >&2
             exit 1
           fi
-          sudo skopeo copy --all --preserve-digests \
-            "docker://ghcr.io/awkward8787/darkjuander@${index}" \
-            "docker://ghcr.io/awkward8787/darkjuander:latest"
+          # An older tag must not point :latest backwards. Rank against every
+          # v* tag on the remote, not against the order the jobs started.
+          set +e
+          remote_tags=$(git ls-remote --tags origin 'refs/tags/v*')
+          fetched=$?
+          set -e
+          if [[ "${fetched}" -ne 0 ]]; then
+            echo "could not list release tags" >&2
+            exit 1
+          fi
+          set +e
+          printf '%s\n' "${remote_tags}" | python3 ./scripts/highest-release-tag.py "${VERSION}"
+          rank=$?
+          set -e
+          if [[ "${rank}" -eq 1 ]]; then
+            echo "leaving :latest unchanged; ${VERSION} is not the highest v* tag"
+          elif [[ "${rank}" -ne 0 ]]; then
+            echo "could not rank ${VERSION} among release tags" >&2
+            exit 1
+          else
+            sudo skopeo copy --all --preserve-digests \
+              "docker://ghcr.io/awkward8787/darkjuander@${index}" \
+              "docker://ghcr.io/awkward8787/darkjuander:latest"
+            latest=$(sudo skopeo inspect --format '{{.Digest}}' \
+              "docker://ghcr.io/awkward8787/darkjuander:latest")
+            if [[ "${latest}" != "${index}" ]]; then
+              echo "latest digest ${latest} is not the signed digest ${index}" >&2
+              exit 1
+            fi
+          fi
 
       - name: logout registries
         if: always()

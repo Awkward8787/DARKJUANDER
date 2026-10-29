@@ -165,8 +165,10 @@ sel = selectors.DefaultSelector()
 sel.register(proc.stdout, selectors.EVENT_READ)
 log = open(log_path, "wb")
 buf = b""
+text = ""
 multi = False
 socket_ok = False
+sent_new_to_sudo = False
 deadline = time.time() + timeout
 try:
     while time.time() < deadline:
@@ -188,6 +190,14 @@ try:
                 multi = True
             typed = login.on_text(text)
             if typed:
+                # After Retype, the probe pipes the new password to sudo.
+                # The socket marker then means the guest accepted that password.
+                if (
+                    login.sent_retype
+                    and login.sent_cmd
+                    and new_password.encode() in typed
+                ):
+                    sent_new_to_sudo = True
                 proc.stdin.write(typed)
                 proc.stdin.flush()
             if marker_ok(text):
@@ -203,7 +213,8 @@ finally:
         proc.wait(timeout=15)
     log.close()
 
-expired = password_expired(text)
+sudo_accepted_new = sent_new_to_sudo and socket_ok
+expired = password_expired(text) and login.sent_retype and sudo_accepted_new
 lines = [
     f"multi-user: {'yes' if multi else 'no'}",
     f"umbrad-socket: {'yes' if socket_ok else 'no'}",

@@ -24,10 +24,16 @@ write_case() {
 }
 
 valid=$(printf 'user:token' | base64 -w 0)
+user_only=$(printf 'user:' | base64 -w 0)
+user_space=$(printf 'user: ' | base64 -w 0)
+space_tok=$(printf ' :tok' | base64 -w 0)
 write_case valid "{\"auths\":{\"ghcr.io\":{\"auth\":\"${valid}\"}}}" pass
 write_case barex '{"auths":{"ghcr.io":{"auth":"x"}}}' fail
 write_case emptycolon '{"auths":{"ghcr.io":{"auth":"Og=="}}}' fail
 write_case space '{"auths":{"ghcr.io":{"auth":" "}}}' fail
+write_case usercolon "{\"auths\":{\"ghcr.io\":{\"auth\":\"${user_only}\"}}}" fail
+write_case userspace "{\"auths\":{\"ghcr.io\":{\"auth\":\"${user_space}\"}}}" fail
+write_case spacetok "{\"auths\":{\"ghcr.io\":{\"auth\":\"${space_tok}\"}}}" fail
 write_case store "{\"credsStore\":\"missing\",\"auths\":{\"ghcr.io\":{\"auth\":\"${valid}\"}}}" fail
 write_case helper "{\"credHelpers\":{\"ghcr.io\":\"missing\"},\"auths\":{\"ghcr.io\":{\"auth\":\"${valid}\"}}}" fail
 

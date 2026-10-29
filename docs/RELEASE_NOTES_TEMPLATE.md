@@ -51,7 +51,7 @@ Skip the `cat` line when the archive was not split. If
 cosign verify-blob \
   --bundle SHA256SUMS.cosign.bundle \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/Awkward8787/DARKJUANDER/.github/workflows/release.yml@refs/tags/v' \
+  --certificate-identity-regexp '^https://github.com/Awkward8787/DARKJUANDER/\.github/workflows/release\.yml@refs/tags/v' \
   SHA256SUMS
 ```
 
