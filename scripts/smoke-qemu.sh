@@ -105,7 +105,12 @@ import sys
 import time
 
 sys.path.insert(0, os.environ["SMOKE_LIB"])
-from smoke_marker import LoginDriver, multi_user_ok, socket_ok as marker_ok
+from smoke_marker import (
+    LoginDriver,
+    multi_user_ok,
+    password_expired,
+    socket_ok as marker_ok,
+)
 
 # systemd colors the console, so "Reached target multi-user.target" is not
 # contiguous bytes. Match the phrase after stripping those sequences.
@@ -160,8 +165,10 @@ sel = selectors.DefaultSelector()
 sel.register(proc.stdout, selectors.EVENT_READ)
 log = open(log_path, "wb")
 buf = b""
+text = ""
 multi = False
 socket_ok = False
+sent_new_to_sudo = False
 deadline = time.time() + timeout
 try:
     while time.time() < deadline:
@@ -183,6 +190,14 @@ try:
                 multi = True
             typed = login.on_text(text)
             if typed:
+                # After Retype, the probe pipes the new password to sudo.
+                # The socket marker then means the guest accepted that password.
+                if (
+                    login.sent_retype
+                    and login.sent_cmd
+                    and new_password.encode() in typed
+                ):
+                    sent_new_to_sudo = True
                 proc.stdin.write(typed)
                 proc.stdin.flush()
             if marker_ok(text):
@@ -198,15 +213,18 @@ finally:
         proc.wait(timeout=15)
     log.close()
 
+sudo_accepted_new = sent_new_to_sudo and socket_ok
+expired = password_expired(text) and login.sent_retype and sudo_accepted_new
 lines = [
     f"multi-user: {'yes' if multi else 'no'}",
     f"umbrad-socket: {'yes' if socket_ok else 'no'}",
     f"login-reached: {'yes' if login.sent_user else 'no'}",
+    f"password-expired: {'yes' if expired else 'no'}",
 ]
-text = "\n".join(lines) + "\n"
-sys.stderr.write(text)
-open(result_path, "w", encoding="utf-8").write(text)
-sys.exit(0 if multi and socket_ok else 1)
+result = "\n".join(lines) + "\n"
+sys.stderr.write(result)
+open(result_path, "w", encoding="utf-8").write(result)
+sys.exit(0 if multi and socket_ok and expired else 1)
 PY
 status=$?
 echo "smoke exit ${status}"

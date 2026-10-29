@@ -31,6 +31,26 @@ def socket_ok(text: str) -> bool:
     return any(line.strip() == MARKER for line in text.splitlines())
 
 
+def password_expired(text: str) -> bool:
+    """True when the transcript contains a password-expiry phrase.
+
+    This is not proof by itself. `chage -l` prints "password must be
+    changed" for an already-expired account, and a banner can print the
+    same words without changing the shadow entry. The smoke test also
+    requires the driver to finish the PAM retype and sudo to accept the
+    new password.
+    """
+    return (
+        "You are required to change your password immediately" in text
+        or "password must be changed" in text
+    )
+
+
+def expiry_proven(text: str, sent_retype: bool, sudo_accepted_new: bool) -> bool:
+    """True when the guest changed dj's password and sudo took the new one."""
+    return password_expired(text) and sent_retype and sudo_accepted_new
+
+
 def multi_user_ok(text: str) -> bool:
     """True for the systemd banner or a guest-built marker line."""
     if "Reached target multi-user.target" in text or "Multi-User System" in text:
