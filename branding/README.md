@@ -22,6 +22,7 @@ Recommended logo, and the default everywhere in this repository: **Umbra Eclipse
 | `terminal/` | Xresources, foot, kitty, Alacritty, GNOME Terminal |
 | `os-icon/hicolor/` | App icon in freedesktop icon-theme sizes |
 | `web/` | Favicon (SVG + ICO), app icons, Apple touch icon, OpenGraph card 1200x630 |
+| `social/darkjuander-social-1280x640.png` | 1280x640 PNG for GitHub Settings > Social preview. Umbra Eclipse logo and the tagline on `#0A0C11` |
 | `research/` | Competitor scan, name check, contrast table |
 | `src/` | `palette.json` (source of truth) and OFL fonts |
 | `scripts/` | `build.py` (regenerates everything), `contrast.py` |
@@ -43,3 +44,5 @@ Change a color in `src/palette.json`, rerun both scripts, and every asset and th
 ## In this repository
 
 This folder is `branding/` at the root of `Awkward8787/DARKJUANDER`. The image definition installs the Plymouth theme, the GRUB theme (`.pf2` fonts are built in the image, not committed), the wallpapers, the hicolor icon, and the terminal schemes. That install has not been booted. See [../docs/BASE.md](../docs/BASE.md).
+
+`social/darkjuander-social-1280x640.png` is the image to upload under GitHub Settings > Social preview. It is the horizontal Umbra Eclipse logo and the tagline "Agents inside a boundary you can audit." on `#0A0C11`.

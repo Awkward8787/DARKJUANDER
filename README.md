@@ -1,8 +1,8 @@
 # DARKJUANDER
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="branding/logo/eclipse/svg/eclipse-horizontal-dark.svg">
-  <img alt="DARKJUANDER" src="branding/logo/eclipse/svg/eclipse-horizontal-light.svg" width="480">
+  <source media="(prefers-color-scheme: dark)" srcset="branding/logo/eclipse/png/horizontal/eclipse-horizontal-dark-1024w.png">
+  <img alt="DARKJUANDER" src="branding/logo/eclipse/png/horizontal/eclipse-horizontal-light-1024w.png" width="480">
 </picture>
 
 **Agents inside a boundary you can audit.**

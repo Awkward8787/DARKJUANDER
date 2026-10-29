@@ -126,6 +126,26 @@ need branding/src/fonts/SpaceGrotesk.ttf
 need branding/src/fonts/OFL-Inter.txt
 need branding/src/fonts/OFL-JetBrainsMono.txt
 need branding/src/fonts/OFL-SpaceGrotesk.txt
+need branding/social/darkjuander-social-1280x640.png
+social_bytes=$(wc -c < branding/social/darkjuander-social-1280x640.png)
+if [[ "${social_bytes}" -ge 1048576 ]]; then
+  echo "error: social preview is ${social_bytes} bytes; it must be under 1 MB" >&2
+  exit 1
+fi
+python3 - <<'PY'
+import struct
+import sys
+from pathlib import Path
+
+path = Path("branding/social/darkjuander-social-1280x640.png")
+data = path.read_bytes()
+if data[:8] != b"\x89PNG\r\n\x1a\n":
+    sys.exit("error: social preview is not a PNG")
+width, height = struct.unpack(">II", data[16:24])
+if (width, height) != (1280, 640):
+    sys.exit(f"error: social preview is {width}x{height}, expected 1280x640")
+print(f"social preview is 1280x640 and {path.stat().st_size} bytes")
+PY
 
 preview_count=$(find branding/logo/tag branding/logo/lattice branding/logo/route -type f -name '*.png' | wc -l)
 if [[ "${preview_count}" -ne 3 ]]; then
@@ -152,8 +172,16 @@ fi
 
 grep -q 'Agents inside a boundary you can audit.' README.md \
   || { echo "error: README is missing the tagline" >&2; exit 1; }
-grep -q 'branding/logo/eclipse/svg/eclipse-horizontal-light.svg' README.md \
-  || { echo "error: README logo is not the committed eclipse horizontal SVG" >&2; exit 1; }
+grep -q 'branding/logo/eclipse/png/horizontal/eclipse-horizontal-light-1024w.png' README.md \
+  || { echo "error: README logo is not the committed eclipse horizontal light PNG" >&2; exit 1; }
+grep -q 'branding/logo/eclipse/png/horizontal/eclipse-horizontal-dark-1024w.png' README.md \
+  || { echo "error: README logo is missing the eclipse horizontal dark PNG" >&2; exit 1; }
+grep -q 'width="480"' README.md \
+  || { echo "error: README logo width is not 480" >&2; exit 1; }
+grep -q 'darkjuander-social-1280x640.png' branding/README.md \
+  || { echo "error: branding README does not name the social preview" >&2; exit 1; }
+grep -q 'GitHub Settings > Social preview' branding/README.md \
+  || { echo "error: branding README does not point at GitHub Settings > Social preview" >&2; exit 1; }
 grep -q 'branding/LICENSE-BRAND.md' README.md \
   || { echo "error: README does not link the brand license" >&2; exit 1; }
 if grep -q '®' README.md; then
