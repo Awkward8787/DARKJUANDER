@@ -1,6 +1,6 @@
 # dj-base
 
-`image/Containerfile` starts from `quay.io/fedora/fedora-bootc:45` pinned by the index digest resolved on 2026-10-28 (`sha256:ed6ebf922c4c63704b1ff7befff74c8d06a5fb74a37b817df3d2cd093568bbc5`). That tag is a manifest list. On that date Quay also had `45-aarch64` and `45-x86_64`. Build on the target architecture. The Containerfile copies the `umbrad` and `dj` binaries you staged, so a macOS `cargo build` must not be copied into the image. The image is not signed.
+`image/Containerfile` starts from `quay.io/fedora/fedora-bootc:45` pinned by the index digest resolved on 2026-10-29 (`sha256:0688bb4fec1318fc2fce52497dd45f84f807f5ea9af1919569801dd05fd6241b`). That tag is a manifest list. On that date Quay also had `45-aarch64` and `45-x86_64`. Build on the target architecture. The Containerfile copies the `umbrad` and `dj` binaries you staged, so a macOS `cargo build` must not be copied into the image. The image is not signed.
 
 What the image definition configures:
 

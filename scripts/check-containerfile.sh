@@ -9,7 +9,7 @@ if [[ ! -f "${file}" ]]; then
   exit 1
 fi
 
-grep -q 'quay.io/fedora/fedora-bootc:45@sha256:ed6ebf922c4c63704b1ff7befff74c8d06a5fb74a37b817df3d2cd093568bbc5' "${file}"
+grep -q 'quay.io/fedora/fedora-bootc:45@sha256:0688bb4fec1318fc2fce52497dd45f84f807f5ea9af1919569801dd05fd6241b' "${file}"
 grep -q 'umbrad.service' "${file}"
 grep -q 'nftables.service' "${file}"
 if grep -Eqi 'secure boot is enabled|image is signed|booted in utm' "${file}"; then

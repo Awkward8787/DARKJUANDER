@@ -1,10 +1,10 @@
 # dj-base
-# Fedora bootc 45 index digest resolved on 2026-10-28. The tag is kept so the
+# Fedora bootc 45 index digest resolved on 2026-10-29. The tag is kept so the
 # line stays readable; the digest is what the build uses. The release
 # workflow builds this file. The pull-request lint job does not. A tag
 # publish can attach a cosign signature; bootc does not enforce it unless
 # you configure that policy. This comment does not claim a boot.
-FROM quay.io/fedora/fedora-bootc:45@sha256:ed6ebf922c4c63704b1ff7befff74c8d06a5fb74a37b817df3d2cd093568bbc5
+FROM quay.io/fedora/fedora-bootc:45@sha256:0688bb4fec1318fc2fce52497dd45f84f807f5ea9af1919569801dd05fd6241b
 
 ARG DJ_VERSION=0.1.0
 
