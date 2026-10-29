@@ -72,9 +72,16 @@ IPAddressAllow=api.openai.com
 IPAddressDeny=any
 ```
 
-Point the engine `base_url` at `http://127.0.0.1:8080/v1`. The proxy should
-connect only to those two names. systemd resolves `IPAddressAllow` hostnames
-when the unit is loaded, so restart the proxy after the addresses change.
+Point the engine `base_url` at `http://127.0.0.1:8080/v1`.
+
+`IPAddressAllow=api.x.ai` is not a name limit. When systemd loads the unit
+it resolves the hostname and keeps those IP addresses. They stay until the
+unit is loaded again. A CDN address is often shared with other names, so
+that list does not mean "only this hostname." The proxy on localhost has
+to enforce the name itself: the CONNECT host, or the request host, and the
+TLS SNI must be `api.x.ai` or `api.openai.com`. The address list only
+narrows which IPs that process may dial.
+
 If you pin prefixes instead, use ranges you have checked yourself.
 `192.0.2.0/24` and `2001:db8::/32` are documentation ranges, not the
 providers' networks.
