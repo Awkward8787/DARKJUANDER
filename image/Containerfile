@@ -35,6 +35,13 @@ COPY image/sysusers.d/darkjuander.conf /usr/lib/sysusers.d/darkjuander.conf
 COPY image/tmpfiles.d/darkjuander.conf /usr/lib/tmpfiles.d/darkjuander.conf
 COPY image/selinux/ /usr/share/darkjuander/selinux/
 
+# The current bootc-image-builder refuses an image that does not name a
+# root filesystem ("missing required info: DefaultRootFs"). Fedora bootc 45
+# does not ship that field. xfs is the disk default for the release images.
+RUN mkdir -p /usr/lib/bootc/install \
+    && printf '%s\n' '[install.filesystem.root]' 'type = "xfs"' \
+      > /usr/lib/bootc/install/00-darkjuander.toml
+
 RUN systemctl enable dj-auditd.service umbrad.service nftables.service
 
 LABEL org.opencontainers.image.title="dj-base" \

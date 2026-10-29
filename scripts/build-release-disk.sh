@@ -49,6 +49,7 @@ for image_type in qcow2 anaconda-iso; do
     -v /var/lib/containers/storage:/var/lib/containers/storage \
     "${bib}" \
     --type "${image_type}" \
+    --rootfs xfs \
     --local \
     --config /config.toml \
     "${tag}"
