@@ -36,26 +36,30 @@ minsize = "8 GiB"
 append = "console=tty0 console=ttyS0,115200"
 EOF
 
-mkdir -p "${out}"
 echo "bootc-image-builder output directory ${out}"
-sudo podman run --rm --privileged \
-  --security-opt label=type:unconfined_t \
-  --pull=newer \
-  -v "${cfg}:/config.toml:ro" \
-  -v "${out}:/output" \
-  -v /var/lib/containers/storage:/var/lib/containers/storage \
-  "${bib}" \
-  --type qcow2 \
-  --type anaconda-iso \
-  --local \
-  --config /config.toml \
-  "${tag}"
+# One request cannot mix a disk image and an ISO.
+for image_type in qcow2 anaconda-iso; do
+  type_out="${out}/${image_type}"
+  mkdir -p "${type_out}"
+  sudo podman run --rm --privileged \
+    --security-opt label=type:unconfined_t \
+    --pull=newer \
+    -v "${cfg}:/config.toml:ro" \
+    -v "${type_out}:/output" \
+    -v /var/lib/containers/storage:/var/lib/containers/storage \
+    "${bib}" \
+    --type "${image_type}" \
+    --local \
+    --config /config.toml \
+    "${tag}"
+done
 
 sudo chown -R "$(id -u):$(id -g)" "${out}"
-mapfile -t disks < <(find "${out}" -type f \( -name '*.qcow2' -o -name '*.iso' \))
-if [[ ${#disks[@]} -eq 0 ]]; then
-  echo "bootc-image-builder wrote no qcow2 or iso under ${out}" >&2
+mapfile -t qcows < <(find "${out}" -type f -name '*.qcow2')
+mapfile -t isos < <(find "${out}" -type f -name '*.iso')
+if [[ ${#qcows[@]} -eq 0 || ${#isos[@]} -eq 0 ]]; then
+  echo "bootc-image-builder did not write both a qcow2 and an iso under ${out}" >&2
   find "${out}" -print >&2
   exit 1
 fi
-printf '%s\n' "${disks[@]}"
+printf '%s\n' "${qcows[@]}" "${isos[@]}"
