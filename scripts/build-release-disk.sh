@@ -49,35 +49,45 @@ EOF
 source_tag=${tag}
 if [[ "${image_type}" == "anaconda-iso" ]]; then
   source_tag="${tag}-iso-depsolve"
+  # Fedora bootc keeps keys under /usr/share/pki/rpm-gpg. The shipped repo
+  # files point at /etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-$basearch, which is
+  # missing. Do not download fedora.gpg: that file is binary OpenPGP and DNF
+  # fails decoding it as UTF-8. Point gpgkey at the share keys that already
+  # exist in the image.
   cat > "${work}/Containerfile" << EOF
 FROM ${tag}
-# This layer exists only so bootc-image-builder can depsolve the Anaconda
-# installer. It is not the image tagged for GHCR and it is not the qcow2.
-RUN if ls /etc/yum.repos.d/*.repo >/dev/null 2>&1; then \\
+# Throwaway layer for Anaconda depsolve only. Not the GHCR or qcow2 image.
+RUN set -eux; \\
+    if ls /etc/yum.repos.d/*.repo >/dev/null 2>&1; then \\
       sed -i -E 's/^(enabled[[:space:]]*=[[:space:]]*)0/\\11/' /etc/yum.repos.d/*.repo; \\
-    fi \\
-    && if ! grep -RqsE '^enabled[[:space:]]*=[[:space:]]*1' /etc/yum.repos.d; then \\
-         printf '%s\\n' \\
-           '[fedora]' \\
-           'name=Fedora 45 Everything' \\
-           'metalink=https://mirrors.fedoraproject.org/metalink?repo=fedora-45&arch=\$basearch' \\
-           'enabled=1' \\
-           'countme=0' \\
-           'gpgcheck=1' \\
-           'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary' \\
-           > /etc/yum.repos.d/fedora-darkjuander.repo; \\
-       fi \\
-    && mkdir -p /etc/pki/rpm-gpg \\
-    && if command -v curl >/dev/null; then \\
-         curl -fsSL -o /etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary https://fedoraproject.org/fedora.gpg; \\
-       elif command -v python3 >/dev/null; then \\
-         python3 -c 'import urllib.request; urllib.request.urlretrieve("https://fedoraproject.org/fedora.gpg", "/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary")'; \\
-       else \\
-         echo "ISO depsolve image needs curl or python3 to fetch the Fedora GPG key" >&2; \\
-         exit 1; \\
-       fi \\
-    && test -s /etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary \\
-    && sed -i -E 's|^gpgkey=.*|gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary|' /etc/yum.repos.d/*.repo
+    fi; \\
+    keydir=/usr/share/pki/rpm-gpg; \\
+    if ! ls "\${keydir}"/RPM-GPG-KEY-fedora-* >/dev/null 2>&1; then \\
+      echo "no Fedora GPG keys under \${keydir}" >&2; \\
+      ls -la /usr/share/pki/rpm-gpg /etc/pki/rpm-gpg 2>/dev/null || true; \\
+      exit 1; \\
+    fi; \\
+    arch=\$(uname -m); \\
+    case "\${arch}" in \\
+      aarch64|arm64) key=RPM-GPG-KEY-fedora-45-aarch64 ;; \\
+      x86_64|amd64) key=RPM-GPG-KEY-fedora-45-x86_64 ;; \\
+      *) key=RPM-GPG-KEY-fedora-45-primary ;; \\
+    esac; \\
+    if [[ ! -f "\${keydir}/\${key}" ]]; then \\
+      key=\$(basename "\$(ls "\${keydir}"/RPM-GPG-KEY-fedora-45-* | head -n 1)"); \\
+    fi; \\
+    sed -i -E "s|^gpgkey=.*|gpgkey=file://\${keydir}/\${key}|" /etc/yum.repos.d/*.repo; \\
+    if ! grep -RqsE '^enabled[[:space:]]*=[[:space:]]*1' /etc/yum.repos.d; then \\
+      printf '%s\\n' \\
+        '[fedora]' \\
+        'name=Fedora 45 Everything' \\
+        'metalink=https://mirrors.fedoraproject.org/metalink?repo=fedora-45&arch=\$basearch' \\
+        'enabled=1' \\
+        'countme=0' \\
+        'gpgcheck=1' \\
+        "gpgkey=file://\${keydir}/\${key}" \\
+        > /etc/yum.repos.d/fedora-darkjuander.repo; \\
+    fi
 EOF
   sudo podman build -f "${work}/Containerfile" -t "${source_tag}" "${work}"
 fi

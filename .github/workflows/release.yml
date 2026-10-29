@@ -169,30 +169,6 @@ jobs:
             dist/smoke.qcow2.serial.log
             dist/smoke.qcow2.smoke.txt
 
-      - name: anaconda iso
-        id: iso
-        if: always() && steps.qcow2.outcome == 'success'
-        run: |
-          ./scripts/build-release-disk.sh \
-            "localhost/dj-base:${{ steps.ver.outputs.version }}" \
-            out/disk anaconda-iso
-          mkdir -p dist/iso-payload
-          ver="${{ steps.ver.outputs.version }}"
-          arch="${{ matrix.arch }}"
-          mapfile -t isos < <(find out/disk/anaconda-iso -type f -name '*.iso')
-          test "${#isos[@]}" -ge 1
-          zstd -T0 -15 -f "${isos[0]}" -o "dist/iso-payload/darkjuander-${ver}-${arch}.iso.zst"
-          mapfile -t files < <(find dist/iso-payload -type f | sort)
-          ./scripts/package-release-assets.sh dist/iso-release "${files[@]}"
-
-      - name: upload iso
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: darkjuander-iso-${{ matrix.arch }}
-          if-no-files-found: warn
-          path: dist/iso-release/**
-
       - name: push arch image
         if: steps.ver.outputs.publish == 'true' && steps.smoke.outcome == 'success'
         run: |
@@ -205,7 +181,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "### ${{ matrix.arch }}"
+            echo "### image ${{ matrix.arch }}"
             echo
             echo '```'
             find dist -type f -printf '%s\t%p\n' 2>/dev/null | sort -k2 || true
@@ -227,9 +203,109 @@ jobs:
             echo
             echo "qcow2 step: ${{ steps.qcow2.outcome }}"
             echo "smoke step: ${{ steps.smoke.outcome }}"
+            echo
+            echo "Primary release artifact is the qcow2. Fedora dnf repos stay disabled in the qcow2 and GHCR image. Anaconda ISO is a separate job (iso)."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # Anaconda ISO is a separate check from the qcow2 image job. It rebuilds
+  # the bootc image and runs bootc-image-builder with a throwaway depsolve
+  # layer. Failure here is visible as job "iso (arch)" and does not fail
+  # "image (arch)" or block the publish job, which only needs image.
+  iso:
+    name: iso (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+          - arch: x86_64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "version=0.0.0-dry.${GITHUB_SHA:0:12}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: install image tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman zstd
+
+      - name: binaries
+        run: |
+          cargo build --workspace --release --locked
+          mkdir -p out/stage
+          install -m 0755 target/release/umbrad out/stage/umbrad
+          install -m 0755 target/release/dj out/stage/dj
+          install -m 0755 target/release/dj-auditd out/stage/dj-auditd
+
+      - name: bootc image
+        run: |
+          sudo podman build \
+            --platform "${{ matrix.platform }}" \
+            --build-arg "DJ_VERSION=${{ steps.ver.outputs.version }}" \
+            -f image/Containerfile \
+            -t "localhost/dj-base:${{ steps.ver.outputs.version }}" \
+            .
+
+      - name: anaconda iso
+        id: iso
+        run: |
+          ./scripts/build-release-disk.sh \
+            "localhost/dj-base:${{ steps.ver.outputs.version }}" \
+            out/disk anaconda-iso
+          mkdir -p dist/iso-payload
+          ver="${{ steps.ver.outputs.version }}"
+          arch="${{ matrix.arch }}"
+          mapfile -t isos < <(find out/disk/anaconda-iso -type f -name '*.iso')
+          test "${#isos[@]}" -ge 1
+          zstd -T0 -15 -f "${isos[0]}" -o "dist/iso-payload/darkjuander-${ver}-${arch}.iso.zst"
+          mapfile -t files < <(find dist/iso-payload -type f | sort)
+          ./scripts/package-release-assets.sh dist/iso-release "${files[@]}"
+
+      - name: upload iso
+        if: steps.iso.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: darkjuander-iso-${{ matrix.arch }}
+          if-no-files-found: error
+          path: dist/iso-release/**
+
+      - name: job summary
+        if: always()
+        run: |
+          {
+            echo "### iso ${{ matrix.arch }}"
+            echo
+            echo '```'
+            find dist -type f -printf '%s\t%p\n' 2>/dev/null | sort -k2 || true
+            echo '```'
+            echo
             echo "iso step: ${{ steps.iso.outcome }}"
             echo
-            echo "The qcow2 and the GHCR image leave Fedora dnf repos disabled. The Anaconda ISO, when it builds, is made from a throwaway image that enables those repos for the installer depsolve. A system installed from that ISO has them enabled. bootc is still the update path."
+            echo "This job is the Anaconda installer ISO only. It does not gate the qcow2 image job or the publish release job. The ISO is built from a throwaway image with Fedora dnf repos enabled for installer depsolve; a system installed from the ISO has those repos enabled. bootc remains the update path."
           } >> "${GITHUB_STEP_SUMMARY}"
 
   publish:

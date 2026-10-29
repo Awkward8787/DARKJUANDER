@@ -33,8 +33,9 @@ Release.
 - The qcow2 and the GHCR container leave Fedora's dnf repositories disabled,
   which is how Fedora bootc ships them. Update that system with `bootc
   switch` or `bootc upgrade`, not `dnf update`.
-- The Anaconda ISO is built from a throwaway image that enables those
-  repositories so the installer can download its own packages. A machine
+- The Anaconda ISO is built in a separate CI job (`iso`) from a throwaway
+  image that enables those repositories so the installer can download its
+  own packages. That job does not gate the qcow2 `image` job. A machine
   installed from the ISO therefore has the Fedora repositories enabled.
   `dnf` can see Fedora mirrors. That is not the supported update path. A
   later `bootc switch` or `bootc upgrade` can overwrite or conflict with
