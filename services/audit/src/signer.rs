@@ -118,7 +118,7 @@ impl SignerClient {
             .write_all(&payload)
             .and_then(|_| stream.write_all(b"\n"))
         {
-            if err.kind() != std::io::ErrorKind::BrokenPipe {
+            if !signer_closed_during_write(&err) {
                 return Err(err.into());
             }
         }
@@ -129,6 +129,14 @@ impl SignerClient {
         }
         Ok(serde_json::from_str(&line)?)
     }
+}
+
+/// The signer can answer and close before `write` finishes. `EPIPE` and
+/// `ECONNRESET` both mean that; the reply may still be readable.
+fn signer_closed_during_write(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::BrokenPipe
+        || err.kind() == std::io::ErrorKind::ConnectionReset
+        || err.raw_os_error() == Some(libc::ECONNRESET)
 }
 
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
@@ -292,10 +300,9 @@ fn sign_request(state: &SignerState, request: &Value) -> Value {
     let Ok(record) = serde_json::from_value::<crate::Record>(raw.clone()) else {
         return json!({"error": "signer request record is not an audit record"});
     };
-    let mut tip = match state.tip.lock() {
-        Ok(guard) => guard,
-        Err(_) => return json!({"error": "signer state lock is poisoned"}),
-    };
+    // A panic in another request poisons the mutex. The tip value is still
+    // the last one stored, so keep signing instead of failing closed.
+    let mut tip = lock_tip(&state.tip);
     let decision = match authorize_record(tip.as_ref(), &record) {
         Ok(decision) => decision,
         Err(err) => return json!({"error": err}),
@@ -311,6 +318,10 @@ fn sign_request(state: &SignerState, request: &Value) -> Value {
         *tip = Some(next);
     }
     json!({"signature": hex::encode(signature.to_bytes())})
+}
+
+fn lock_tip(tip: &Mutex<Option<SignedTip>>) -> std::sync::MutexGuard<'_, Option<SignedTip>> {
+    tip.lock().unwrap_or_else(|err| err.into_inner())
 }
 
 #[derive(PartialEq, Eq)]
@@ -587,6 +598,13 @@ fn store_signed_tip(path: &Path, tip: &SignedTip) -> Result<(), AuditError> {
         file.sync_all()?;
     }
     fs::rename(&tmp, path)?;
+    // The file sync above makes the bytes durable. The rename itself is only
+    // durable once the parent directory is synced.
+    let dir = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    File::open(dir)?.sync_all()?;
     Ok(())
 }
 
@@ -632,5 +650,57 @@ pub fn expected_writer_uid() -> u32 {
         current_uid()
     } else {
         unsafe { (*pwd).pw_uid }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_tip(seq: u64) -> SignedTip {
+        SignedTip {
+            seq,
+            prev_hash: "ab".repeat(32),
+            hash: "cd".repeat(32),
+        }
+    }
+
+    #[test]
+    fn poisoned_tip_lock_returns_the_last_tip() {
+        let tip = Mutex::new(Some(sample_tip(4)));
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = tip.lock().expect("lock before poison");
+            panic!("worker failed while holding the tip");
+        }));
+        assert!(panicked.is_err());
+        assert!(tip.is_poisoned());
+        let guard = lock_tip(&tip);
+        assert_eq!(guard.as_ref().expect("recovered tip").seq, 4);
+    }
+
+    #[test]
+    fn reset_during_write_is_treated_like_a_broken_pipe() {
+        let reset = std::io::Error::from_raw_os_error(libc::ECONNRESET);
+        let pipe = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe");
+        let other = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
+        assert!(signer_closed_during_write(&reset));
+        assert!(signer_closed_during_write(&pipe));
+        assert!(!signer_closed_during_write(&other));
+    }
+
+    #[test]
+    fn signed_tip_rename_survives_a_directory_sync() {
+        let dir = std::env::temp_dir().join(format!(
+            "dj-audit-tip-{}-{}",
+            std::process::id(),
+            NEXT_SIGNER.fetch_add(1, Ordering::SeqCst)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("signed-tip.json");
+        store_signed_tip(&path, &sample_tip(4)).unwrap();
+        let loaded = load_signed_tip(&path).unwrap().unwrap();
+        assert_eq!(loaded.seq, 4);
+        assert!(!path.with_extension("json.tmp").exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 }
