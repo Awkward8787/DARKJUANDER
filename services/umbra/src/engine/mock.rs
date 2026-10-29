@@ -83,6 +83,7 @@ mod tests {
                     role: "user".into(),
                     content: "hello DJ_INJECT_EXFIL".into(),
                 }],
+                confidentiality: None,
             })
             .unwrap();
         assert_eq!(response.tool_calls[0].name, "email.send");

@@ -5,7 +5,9 @@
 
 pub mod llama;
 pub mod mock;
+pub mod remote;
 
+use dj_label::Confidentiality;
 use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
@@ -14,6 +16,9 @@ use thiserror::Error;
 pub struct EngineRequest {
     pub model: String,
     pub messages: Vec<ChatMessage>,
+    /// Cloud adapters send a request only when this is `Some(Public)`.
+    /// `None` fails closed so a caller cannot forget the label.
+    pub confidentiality: Option<Confidentiality>,
 }
 
 #[derive(Clone, Debug)]

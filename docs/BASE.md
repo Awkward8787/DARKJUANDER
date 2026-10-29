@@ -4,13 +4,13 @@
 
 What the image definition configures:
 
-- `dj-auditd.service` as user `dj-audit`. The signing seed and the signer's copy of the chain stay in `/var/lib/dj-audit` (mode `0700`, seed mode `0600`). The verifying key is published at `/run/dj-audit/audit.ed25519.pub` so `umbrad` can read it without listing the seed directory. `umbrad` can connect to `/run/dj-audit/signer.sock`. The signer accepts only uid `dj-umbra` and only a record that extends its last signed head. Offline verify still accepts an older log when that log is restored together with the checkpoint signed for it.
+- `dj-auditd.service` as user `dj-audit`. The signing seed and the last signed head stay in `/var/lib/dj-audit` (mode `0700`, seed mode `0600`). A durable copy of the verifying key is written there too, at `audit.ed25519.pub`, for offline `dj audit verify` of a copied log. The same key is published at `/run/dj-audit/audit.ed25519.pub` so `umbrad` can read it without listing the seed directory. `umbrad` can connect to `/run/dj-audit/signer.sock`. The signer accepts only uid `dj-umbra`, only a few requests at a time, and only a record that extends its last signed head. Offline verify still accepts an older log when that log is restored together with the checkpoint signed for it.
 - `umbrad.service` in `umbra-weights.slice`, with systemd sandboxing and localhost-only IP filtering. It starts after `dj-auditd`.
 - nftables default-deny inbound, loopback and ICMP accepted, forwarding dropped.
 - sysctl: hide kernel pointers, restrict dmesg, disable unprivileged BPF, restrict ptrace, disable kexec.
 - sshd disabled when the unit exists. The rpm-ostree count-me timer is masked when it exists.
 - `dj-llama.service` installed and not enabled.
-- Umbra Eclipse branding, via `image/apply-branding.sh`. The build fails if a listed asset is missing or empty. CI runs `podman build` on this Containerfile with stub `umbrad`, `dj`, and `dj-auditd` binaries, then `lsinitrd` must show the Plymouth theme. That job does not boot the image, and the stubs are not the release binaries.
+- Umbra Eclipse branding, via `image/apply-branding.sh`. The build fails if a listed asset is missing or empty. CI runs `podman build` on this Containerfile with stub `umbrad`, `dj`, and `dj-auditd` binaries, then `image/check-initramfs.sh` requires the theme script path, `Theme=darkjuander` inside the initramfs, and `Plymouth.ttf` pointing at Inter. That job does not boot the image, and the stubs are not the release binaries.
   - Plymouth theme `darkjuander` at `/usr/share/plymouth/themes/darkjuander`, set as the default. The Containerfile runs `dracut` and replaces `/usr/lib/modules/*/initramfs.img`. `image/check-initramfs.sh` requires `usr/share/plymouth/themes/darkjuander/darkjuander.script` in the listing, `Theme=darkjuander` from `lsinitrd -f etc/plymouth/plymouthd.conf`, and `Plymouth.ttf` pointing at Inter. It fails if the initramfs is over 140 MiB. `plymouth-plugin-script` and `plymouth-plugin-label` (`label-freetype.so`) are installed. label-freetype ignores the family in `Image.Text` and draws with `Plymouth.ttf`. `50-darkjuander-inter.conf` is installed ahead of Noto so that file is Inter, and the build checks `fc-match` before dracut. `UseSimpledrm=1` is appended to `/usr/share/plymouth/plymouthd.defaults` because the plymouth dracut module reads that file when hostonly is off. That keeps the initramfs near the base size instead of pulling in nvidia firmware. simpledrm is in the Fedora kernel. A UEFI framebuffer (UTM) is the expected splash path. This has not been booted. `/usr/lib/bootc/kargs.d/10-darkjuander.toml` sets `rhgb` and `quiet`.
   - GRUB artwork in `branding/grub/` is not installed. bootupd's static config does not read a theme, `/etc/default/grub`, or `/usr/share/grub/themes`.
   - Wallpapers at `/usr/share/backgrounds/darkjuander/`, generated during the image build. `default.png` points at the 3840x2160 file. `/usr/share/gnome-background-properties/darkjuander.xml` names the same file. No desktop or greeter is installed, so nothing displays the wallpaper or the terminal color schemes yet. Those files are still installed.
@@ -26,7 +26,7 @@ What it does not do:
 - It does not enroll Secure Boot or seal a LUKS key to a TPM.
 - It does not load `image/selinux/darkjuander.te`.
 - CI builds the Containerfile and checks the initramfs. It does not run `bootc-image-builder`, and it does not boot the result.
-- The Plymouth theme, the wallpaper, and the issue snippet have not been seen on a boot. The GRUB artwork is not installed.
+- The Plymouth theme and the wallpaper have not been seen on a boot. The GRUB artwork is not installed. The pre-login text is the package `/usr/lib/issue`, which prints `PRETTY_NAME` once.
 
 ## Fedora 45 kernel options
 

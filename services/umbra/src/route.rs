@@ -44,6 +44,7 @@ pub struct ModelSpec {
     pub size: SizeClass,
     pub memory_mb: u64,
     pub engine: String,
+    pub provider: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -67,6 +68,7 @@ pub struct RouteDecision {
     pub engine: String,
     pub reason: String,
     pub scorer_preferred: String,
+    pub provider: Option<String>,
     pub removed: Vec<RemovedRoute>,
     pub memory_some_avg10: f64,
     pub threshold: f64,
@@ -93,9 +95,13 @@ pub struct RouteInput<'a> {
     pub prefer_cloud: bool,
     pub local_only: bool,
     pub policy: &'a Policy,
-    /// Concrete model ids this caller may run. `None` skips the grant filter,
-    /// which the daemon does not do. The gateway always passes `Some`.
+    /// Concrete model ids this caller may run. `None` skips the model-id grant
+    /// filter, which the daemon does not do. The gateway always passes `Some`.
     pub granted: Option<&'a BTreeSet<String>>,
+    /// Providers the operator has explicitly enabled. Empty means cloud is off.
+    pub enabled_providers: &'a BTreeSet<String>,
+    /// Providers this caller may use (`provider.use:<id>`).
+    pub granted_providers: &'a BTreeSet<String>,
 }
 
 pub fn decide(input: &RouteInput<'_>) -> Result<RouteDecision, RouteError> {
@@ -167,6 +173,7 @@ pub fn decide(input: &RouteInput<'_>) -> Result<RouteDecision, RouteError> {
         engine: selected.engine.clone(),
         reason,
         scorer_preferred,
+        provider: selected.provider.clone(),
         removed,
         memory_some_avg10: input.psi.memory_some_avg10,
         threshold: input.threshold,
@@ -205,6 +212,20 @@ fn hard_block(input: &RouteInput<'_>, spec: &ModelSpec) -> Option<RemovedRoute> 
             reason: "local-only mode is on".into(),
         });
     }
+    // Code rule, not the YAML file. A loosened policy cannot put this
+    // candidate back. Private and secret are the confidentiality labels.
+    if spec.location == Location::Cloud
+        && input
+            .labels
+            .confidentiality
+            .at_least(dj_label::Confidentiality::Private)
+    {
+        return Some(RemovedRoute {
+            model: spec.id.clone(),
+            rule_id: "private-data-stays-local".into(),
+            reason: "private or secret data cannot be routed to a cloud model".into(),
+        });
+    }
     let decision = input.policy.decide(&PolicyRequest {
         action: "model.use".into(),
         action_class: ActionClass::Model,
@@ -217,6 +238,28 @@ fn hard_block(input: &RouteInput<'_>, spec: &ModelSpec) -> Option<RemovedRoute> 
             rule_id: decision.rule_id,
             reason: decision.reason,
         });
+    }
+    if spec.location == Location::Cloud {
+        let Some(provider) = spec
+            .provider
+            .as_deref()
+            .filter(|provider| !provider.is_empty())
+        else {
+            return Some(RemovedRoute {
+                model: spec.id.clone(),
+                rule_id: "provider-grant".into(),
+                reason: "cloud model has no provider".into(),
+            });
+        };
+        if !input.enabled_providers.contains(provider)
+            || !input.granted_providers.contains(provider)
+        {
+            return Some(RemovedRoute {
+                model: spec.id.clone(),
+                rule_id: "provider-grant".into(),
+                reason: format!("provider {provider} is not granted to this caller"),
+            });
+        }
     }
     None
 }
@@ -287,6 +330,11 @@ mod tests {
                     size,
                     memory_mb: memory,
                     engine: engine.into(),
+                    provider: if id == "cloud-remote" {
+                        Some("xai".into())
+                    } else {
+                        None
+                    },
                 },
             );
         }
@@ -321,7 +369,15 @@ mod tests {
             local_only,
             policy,
             granted: None,
+            enabled_providers: empty_grants(),
+            granted_providers: empty_grants(),
         }
+    }
+
+    fn empty_grants() -> &'static BTreeSet<String> {
+        use std::sync::OnceLock;
+        static EMPTY: OnceLock<BTreeSet<String>> = OnceLock::new();
+        EMPTY.get_or_init(BTreeSet::new)
     }
 
     #[test]
@@ -381,5 +437,66 @@ mod tests {
                 .any(|item| item.model == "cloud-remote"
                     && item.rule_id == "private-data-stays-local")
         );
+    }
+
+    #[test]
+    fn private_stays_local_even_when_the_provider_is_granted() {
+        let (models, aliases) = catalog();
+        let policy = Policy::parse(
+            r#"
+version: 1
+default_decision: allow
+rules:
+  - id: allow-models
+    match:
+      action: model.use
+    decision: allow
+    reason: policy was loosened
+"#,
+        )
+        .unwrap();
+        let labels = Labels {
+            confidentiality: Confidentiality::Secret,
+            ..Labels::user("agent")
+        };
+        let psi = PsiSnapshot::idle();
+        let mut enabled = BTreeSet::new();
+        enabled.insert("xai".into());
+        let granted_providers = enabled.clone();
+        let mut input = input(&models, &aliases, &policy, &labels, &psi, false);
+        input.enabled_providers = &enabled;
+        input.granted_providers = &granted_providers;
+        let decision = decide(&input).unwrap();
+        assert_eq!(decision.scorer_preferred, "cloud-remote");
+        assert_eq!(decision.selected, "mid-local");
+        assert_eq!(decision.location, Location::Local);
+        assert!(decision
+            .removed
+            .iter()
+            .any(|item| item.rule_id == "private-data-stays-local"));
+    }
+
+    #[test]
+    fn public_cloud_requires_both_grants() {
+        let (models, aliases) = catalog();
+        let policy = Policy::bundled();
+        let labels = Labels::user("agent");
+        let psi = PsiSnapshot::idle();
+        let mut enabled = BTreeSet::new();
+        enabled.insert("xai".into());
+        let mut input = input(&models, &aliases, &policy, &labels, &psi, false);
+        input.enabled_providers = &enabled;
+        input.granted_providers = empty_grants();
+        let blocked = decide(&input).unwrap();
+        assert_eq!(blocked.selected, "mid-local");
+        assert!(blocked
+            .removed
+            .iter()
+            .any(|item| item.rule_id == "provider-grant"));
+        input.granted_providers = &enabled;
+        let allowed = decide(&input).unwrap();
+        assert_eq!(allowed.selected, "cloud-remote");
+        assert_eq!(allowed.location, Location::Cloud);
+        assert_eq!(allowed.provider.as_deref(), Some("xai"));
     }
 }

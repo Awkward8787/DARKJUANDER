@@ -28,16 +28,20 @@ tests. Passing them does not mean DARKJUANDER enforces the PRD threat model.
   the file, is not caught. Content inspection (PRD PE-6 and PE-7) is not built.
 - The audit log detects truncation and field swaps against its signed
   checkpoint. `dj-auditd` holds the signing seed as user `dj-audit` in
-  `/var/lib/dj-audit` (mode `0700`) and keeps its own copy of every record it
-  signs. `umbrad` has the socket and the published verifying key at
-  `/run/dj-audit/audit.ed25519.pub`. The signer recomputes each record hash
-  and signs a new head only when that record extends the last one it signed,
-  so a compromised `umbrad` cannot rewind the signer or replace history with
-  a scrubbed chain. `umbrad` can still append new records. Offline verify
-  cannot detect a full rollback to an older log plus the checkpoint that was
-  signed for it: that pair is internally consistent, and there is no external
-  anchor. This is not a TPM. Root, or anyone who gets `dj-audit`'s uid, can
-  sign. The log is not encrypted.
+  `/var/lib/dj-audit` (mode `0700`) and remembers only the last signed head,
+  not a second copy of the log. `umbrad` has the socket and the live
+  verifying key at `/run/dj-audit/audit.ed25519.pub`. The same public key is
+  also stored at `/var/lib/dj-audit/audit.ed25519.pub`. That file is not a
+  secret. When `/run` is gone, `dj audit verify --verifying-key
+  /var/lib/dj-audit/audit.ed25519.pub` checks a copied log. The signer
+  recomputes each record hash and signs a new head only when that record
+  extends the last one it signed, so a compromised `umbrad` cannot rewind
+  the signer or replace history with a scrubbed chain. `umbrad` can still
+  append new records. Offline verify cannot detect a full rollback to an
+  older log plus the checkpoint that was signed for it: that pair is
+  internally consistent, and there is no external anchor. This is not a
+  TPM. Root, or anyone who gets `dj-audit`'s uid, can sign. The log is not
+  encrypted.
 - `workspace = "/"` is rejected. The seccomp profile is still a denylist, not
   an allowlist. cgroup limits and the SELinux domain are not enforced by these
   tests.
@@ -66,7 +70,7 @@ The image definition is [image/Containerfile](image/Containerfile). It targets F
 
 ## What is planned
 
-The honest list is [docs/ROADMAP.md](docs/ROADMAP.md). In short: no disk image has been booted, images are not signed, the audit log is not encrypted, cache hits do not skip inference, there is no desktop and no trusted approval dialog, and there is no real cloud provider client. CI builds the bootc image and checks the initramfs. That is not a boot. The Section 7.9 numbers are targets, not measurements. An in-process check that routing returns in under 5 ms is not the guest p95 target.
+The honest list is [docs/ROADMAP.md](docs/ROADMAP.md). In short: the disk image has not been built or booted, images are not signed, the audit log is not encrypted, cache hits do not skip inference, there is no desktop and no trusted approval dialog. Cloud routing is implemented and off by default; see [docs/providers.md](docs/providers.md). The image unit still denies non-localhost egress until an operator installs the drop-in there. CI builds the bootc image and checks the initramfs. That is not a boot. The Section 7.9 numbers are targets, not measurements. An in-process check that routing returns in under 5 ms is not the guest p95 target.
 
 ## Build and test the userspace
 

@@ -3,6 +3,8 @@
 
 #![forbid(unsafe_code)]
 
+mod provider_cmd;
+
 use clap::{Parser, Subcommand};
 use dj_sandbox::Manifest;
 use std::path::PathBuf;
@@ -29,6 +31,75 @@ enum Command {
     },
     /// Run the five UMBRA scenes against the mock engine.
     Demo,
+    /// Store a cloud provider key. Routing stays off until `grant`.
+    Provider {
+        #[command(subcommand)]
+        command: ProviderCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProviderCommand {
+    /// Store an API key. Reads `--key-file` or stdin. The key is not a flag.
+    Add {
+        provider: String,
+        #[arg(long)]
+        model: String,
+        #[arg(long)]
+        key_file: Option<PathBuf>,
+        /// Record a systemd LoadCredential name instead of a direct file read.
+        #[arg(long)]
+        systemd: bool,
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Show providers. Keys are not printed.
+    List {
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Delete a provider and shred its local credential.
+    Remove {
+        provider: String,
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Explicitly allow UMBRA to consider this provider.
+    Grant {
+        provider: String,
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Turn a provider grant off.
+    Revoke {
+        provider: String,
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Send a fixed public "ping" to the provider. Do not put private text here.
+    Test {
+        provider: String,
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Send the bearer key to a host other than the provider preset or loopback.
+        #[arg(long)]
+        allow_untrusted_host: bool,
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Official subscription sign-in, when the provider documents one.
+    Login {
+        provider: String,
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
+    /// Set the provider model id used by `test` and by registry injection.
+    Model {
+        provider: String,
+        model: String,
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -37,6 +108,7 @@ enum AuditCommand {
     Verify {
         path: PathBuf,
         /// Published ed25519 verifying key. Defaults to /run/dj-audit/audit.ed25519.pub.
+        /// A durable copy for offline verify is /var/lib/dj-audit/audit.ed25519.pub.
         #[arg(long)]
         verifying_key: Option<PathBuf>,
     },
@@ -135,5 +207,56 @@ fn real_main() -> Result<ExitCode, String> {
             print!("{report}");
             Ok(ExitCode::SUCCESS)
         }
+        Command::Provider { command } => match command {
+            ProviderCommand::Add {
+                provider,
+                model,
+                key_file,
+                systemd,
+                state_dir,
+            } => provider_cmd::add(
+                &provider_cmd::state_dir(state_dir),
+                &provider,
+                key_file.as_deref(),
+                &model,
+                systemd,
+            ),
+            ProviderCommand::List { state_dir } => {
+                provider_cmd::list(&provider_cmd::state_dir(state_dir))
+            }
+            ProviderCommand::Remove {
+                provider,
+                state_dir,
+            } => provider_cmd::remove(&provider_cmd::state_dir(state_dir), &provider),
+            ProviderCommand::Grant {
+                provider,
+                state_dir,
+            } => provider_cmd::grant(&provider_cmd::state_dir(state_dir), &provider, true),
+            ProviderCommand::Revoke {
+                provider,
+                state_dir,
+            } => provider_cmd::grant(&provider_cmd::state_dir(state_dir), &provider, false),
+            ProviderCommand::Test {
+                provider,
+                base_url,
+                allow_untrusted_host,
+                state_dir,
+            } => provider_cmd::test(
+                &provider_cmd::state_dir(state_dir),
+                &provider,
+                base_url.as_deref(),
+                allow_untrusted_host,
+            ),
+            ProviderCommand::Login {
+                provider,
+                state_dir,
+            } => provider_cmd::login(&provider_cmd::state_dir(state_dir), &provider),
+            ProviderCommand::Model {
+                provider,
+                model,
+                state_dir,
+            } => provider_cmd::model(&provider_cmd::state_dir(state_dir), &provider, &model),
+        }
+        .map(|()| ExitCode::SUCCESS),
     }
 }

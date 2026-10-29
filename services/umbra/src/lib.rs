@@ -6,10 +6,13 @@
 #![forbid(unsafe_code)]
 
 pub mod cache;
+pub mod credential;
 pub mod engine;
+pub mod provider;
 pub mod psi;
 pub mod registry;
 pub mod route;
+pub mod siwc;
 
 pub use cache::{Cache, CacheKey, CacheStats};
 pub use engine::{Engine, EngineError, EngineRequest, EngineResponse, ToolCall};

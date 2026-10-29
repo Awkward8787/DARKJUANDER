@@ -97,6 +97,7 @@ mod tests {
             size: SizeClass::Mid,
             memory_mb: 8000,
             engine: "mock".into(),
+            provider: None,
         });
         registry.record_use("mid-local", "agent-a");
         registry.record_use("mid-local", "agent-b");

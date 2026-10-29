@@ -10,6 +10,8 @@ audit_verifying_key: /run/dj-audit/audit.ed25519.pub
 policy_path: /usr/share/darkjuander/policy/default.yaml
 local_only: true
 prefer_cloud: false
+# Optional. A missing file adds no providers. See docs/providers.md.
+# provider_registry: /var/lib/darkjuander/providers/registry.yaml
 psi_memory_some_avg10_threshold: 25.0
 psi_memory_path: /proc/pressure/memory
 psi_io_path: /proc/pressure/io

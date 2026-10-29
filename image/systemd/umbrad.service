@@ -34,6 +34,8 @@ SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Cloud stays unreachable until an operator installs the drop-in in
+# docs/providers.md. A provider grant does not change this.
 IPAddressAllow=localhost
 IPAddressDeny=any
 ReadWritePaths=/var/lib/darkjuander /run/darkjuander

@@ -41,6 +41,18 @@ pub struct FileConfig {
     pub aliases: BTreeMap<String, AliasConfig>,
     pub engines: BTreeMap<String, EngineConfig>,
     pub principals: Vec<PrincipalConfig>,
+    /// Operator grants. A missing entry means the provider is off.
+    #[serde(default)]
+    pub providers: BTreeMap<String, ProviderToggle>,
+    /// Written by `dj provider`. Missing file means no CLI grants.
+    #[serde(default)]
+    pub provider_registry: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ProviderToggle {
+    #[serde(default)]
+    pub granted: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -49,6 +61,8 @@ pub struct ModelConfig {
     pub location: String,
     pub size: String,
     pub memory_mb: u64,
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -66,6 +80,21 @@ pub struct EngineConfig {
     pub base_url: Option<String>,
     #[serde(default)]
     pub timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub retries: Option<u32>,
+    #[serde(default)]
+    pub stream: Option<bool>,
+    #[serde(default)]
+    pub backoff_ms: Option<u64>,
+    #[serde(default)]
+    pub credential_file: Option<PathBuf>,
+    #[serde(default)]
+    pub credential_systemd: Option<String>,
+    /// `chat-completions` or `responses`. Defaults from the credential format.
+    #[serde(default)]
+    pub wire: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -115,6 +144,23 @@ impl FileConfig {
                         )));
                     }
                 }
+                "openai-compatible" => {
+                    let has_url = engine
+                        .base_url
+                        .as_deref()
+                        .map(|url| !url.is_empty())
+                        .unwrap_or(false);
+                    let has_provider = engine
+                        .provider
+                        .as_deref()
+                        .map(|id| !id.is_empty())
+                        .unwrap_or(false);
+                    if !has_url && !has_provider {
+                        return Err(ConfigError::Invalid(format!(
+                            "engine {name} needs base_url or provider"
+                        )));
+                    }
+                }
                 other => {
                     return Err(ConfigError::Invalid(format!(
                         "engine {name} has unknown kind {other}"
@@ -137,5 +183,6 @@ mod tests {
         assert!(cfg.local_only);
         assert!(!cfg.allow_psi_override);
         assert!(cfg.aliases["default-chat"].cloud.is_none());
+        assert!(cfg.providers.is_empty());
     }
 }
