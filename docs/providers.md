@@ -48,22 +48,46 @@ not explicitly public.
 The audit record stores the provider id, the model id, the route, and token
 counts. It does not store the API key, the access token, or the prompt text.
 `dj provider test` sends the fixed public string `ping` and nothing else.
+`--base-url` may name the provider's preset host (`api.x.ai` or
+`api.openai.com`) or a loopback address. Any other host is refused, so the
+bearer key is not sent to an arbitrary https server. `--allow-untrusted-host`
+lifts that host check and nothing else: a cleartext URL that is not loopback
+is still refused, and a URL with embedded credentials is still refused.
 
 Cloud output is labeled untrusted, joined with the input labels.
 
 `umbrad.service` still sets `IPAddressAllow=localhost` and `IPAddressDeny=any`.
-A grant does not open egress. Install a drop-in only after you mean for the
-daemon to reach the network:
+A grant does not open egress. Prefer to leave `umbrad` on localhost and give
+outbound access only to a proxy that dials the providers.
 
 ```
+# Recommended. umbrad stays localhost-only. This unit is a forward proxy
+# you run; DARKJUANDER does not ship that binary.
+# /etc/systemd/system/dj-provider-proxy.service
+[Service]
+ExecStart=/usr/bin/your-forward-proxy --listen 127.0.0.1:8080
+IPAddressAllow=localhost
+IPAddressAllow=api.x.ai
+IPAddressAllow=api.openai.com
+IPAddressDeny=any
+```
+
+Point the engine `base_url` at `http://127.0.0.1:8080/v1`. The proxy should
+connect only to those two names. systemd resolves `IPAddressAllow` hostnames
+when the unit is loaded, so restart the proxy after the addresses change.
+If you pin prefixes instead, use ranges you have checked yourself.
+`192.0.2.0/24` and `2001:db8::/32` are documentation ranges, not the
+providers' networks.
+
+```
+# Broader, and not the one to copy first.
 # /etc/systemd/system/umbrad.service.d/cloud-egress.conf
 [Service]
 IPAddressAllow=any
 ```
 
-That allows the daemon to any host, not only the two APIs. Provider
-addresses change, so the unit does not pin them. `systemctl daemon-reload`
-and restart `umbrad` after adding it.
+`IPAddressAllow=any` lets the daemon reach every host. `systemctl daemon-reload`
+and restart the unit after either drop-in.
 
 ## Add a key
 

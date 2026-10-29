@@ -815,6 +815,29 @@ mod tests {
             },
         );
         assert!(wrong.is_err());
+        let wrong_subject = validate_id_token(
+            body["id_token"].as_str().unwrap(),
+            &set,
+            &IdCheck {
+                issuer: "https://auth.openai.com",
+                audience: "oaiapp_test",
+                nonce: Some("nonce-1"),
+                subject: Some("other-user"),
+            },
+        );
+        assert!(wrong_subject.is_err());
+        let same_subject = validate_id_token(
+            body["id_token"].as_str().unwrap(),
+            &set,
+            &IdCheck {
+                issuer: "https://auth.openai.com",
+                audience: "oaiapp_test",
+                nonce: Some("nonce-1"),
+                subject: Some("user-1"),
+            },
+        )
+        .unwrap();
+        assert_eq!(same_subject.subject, "user-1");
     }
 
     fn rsa_fixture() -> (String, String) {
