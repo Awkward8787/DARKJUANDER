@@ -38,7 +38,7 @@ tests. Passing them does not mean DARKJUANDER enforces the PRD threat model.
 - `workspace = "/"` is rejected. The seccomp profile is still a denylist, not
   an allowlist. cgroup limits and the SELinux domain are not enforced by these
   tests.
-- No disk image has been built or booted. Section 7.9 numbers are targets.
+- These demos do not build or boot a disk image. [docs/INSTALL.md](docs/INSTALL.md) is the download path once a `v*` release exists. Section 7.9 numbers are targets.
 - `allow_psi_override` is false in `examples/config/umbrad.yaml` and must stay
   false outside tests. The demo turns it on only in a temporary config so
   scene 4 can cross the PSI threshold without filling the machine's RAM.
@@ -59,7 +59,7 @@ as a security boundary.
 
 `dj sandbox plan` prints a bubblewrap command that drops the network and capabilities. `dj sandbox run` refuses to start if `bwrap` is missing. When `bwrap` is present, the child applies Landlock and a seccomp denylist before `exec`.
 
-The image definition is [image/Containerfile](image/Containerfile). It targets Fedora bootc 45 for aarch64 and x86_64.
+The image definition is [image/Containerfile](image/Containerfile). It targets Fedora bootc 45 for aarch64 and x86_64. Install steps for a published release are in [docs/INSTALL.md](docs/INSTALL.md).
 
 ## What is planned
 
@@ -88,7 +88,9 @@ The GGUF checksum and the llama.cpp commit are in [engines/llama/README.md](engi
 
 ## Boot on an M1 Max with UTM
 
-This repository has not produced a disk image, and nobody has booted one in UTM yet. The steps below are the build path. Stop if a command fails. Do not treat a failed image build as a bootable DARKJUANDER.
+Download and install steps are in [docs/INSTALL.md](docs/INSTALL.md). They apply to a GitHub Release created by `.github/workflows/release.yml` after a `v*` tag. This README does not claim that boot has happened.
+
+To build a disk yourself on Linux instead of downloading one:
 
 You need Linux to build the image. `cargo build` on macOS produces a macOS binary, and the guest cannot run it. On the Mac, use UTM to boot a normal Fedora 45 aarch64 VM first (Fedora's own cloud or raw image, not this repo), give it 8 CPUs and about 32 GB of RAM, and build inside that VM. Podman machine on macOS is a poor fit for `bootc-image-builder`, which needs privileged loop devices.
 
@@ -104,9 +106,9 @@ cargo test --workspace --locked
 ./scripts/build-disk.sh "$HOME/.ssh/authorized_keys"
 ```
 
-`build-disk.sh` writes raw and qcow2 files under `out/disk/` when bootc-image-builder succeeds. Copy the raw image back to the Mac.
+`build-disk.sh` writes raw and qcow2 files under `out/disk/` when bootc-image-builder succeeds. Copy the raw image back to the Mac. That script does not set a console password. A downloaded release image does; its login is in [docs/INSTALL.md](docs/INSTALL.md), not in the list below.
 
-In UTM on the M1 Max:
+In UTM on the M1 Max, for a disk you built yourself:
 
 1. Create a new VM. Choose Virtualize, not Emulate. Operating system: Linux. Architecture: ARM64.
 2. Give it 8 CPU cores and 32768 MB of memory. Inference in the guest is CPU-only.

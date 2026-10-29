@@ -1,7 +1,8 @@
 # dj-base
 # Fedora bootc 45 index digest resolved on 2026-10-28. The tag is kept so the
-# line stays readable; the digest is what the build uses. This image has not
-# been built or booted in CI, and it is not signed.
+# line stays readable; the digest is what the build uses. The release
+# workflow builds this file. The pull-request lint job does not. The image
+# is not signed, and this comment does not claim a boot.
 FROM quay.io/fedora/fedora-bootc:45@sha256:ed6ebf922c4c63704b1ff7befff74c8d06a5fb74a37b817df3d2cd093568bbc5
 
 ARG DJ_VERSION=0.1.0
@@ -41,4 +42,4 @@ LABEL org.opencontainers.image.title="dj-base" \
       org.opencontainers.image.version="${DJ_VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.source="https://github.com/Awkward8787/DARKJUANDER" \
-      org.darkjuander.status="definition-not-built-in-ci"
+      org.darkjuander.status="built-by-the-release-workflow-when-tagged"

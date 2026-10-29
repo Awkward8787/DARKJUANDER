@@ -16,7 +16,7 @@ What it does not do:
 - It does not sign the image.
 - It does not enroll Secure Boot or seal a LUKS key to a TPM.
 - It does not load `image/selinux/darkjuander.te`.
-- CI has not run `podman build` or `bootc-image-builder`.
+- `.github/workflows/release.yml` builds this image on a `v*` tag and on a dry run. A dry run does not publish a release. A hardware boot is not claimed here.
 
 ## Fedora 45 kernel options
 
