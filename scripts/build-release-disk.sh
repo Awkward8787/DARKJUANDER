@@ -10,7 +10,8 @@ if [[ $# -lt 2 ]]; then
 fi
 
 tag=$1
-out=$2
+mkdir -p "$2"
+out=$(cd "$2" && pwd)
 root=$(cd "$(dirname "$0")/.." && pwd)
 bib=${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder@sha256:b858892139e0779d48869a4dd8cbbc4e257da49f5a4b502824a55d221ed65a55}
 password=$(grep -v '^[[:space:]]*#' "${root}/image/console-password.txt" | head -n 1 | tr -d '\r\n')
@@ -36,6 +37,7 @@ append = "console=tty0 console=ttyS0,115200"
 EOF
 
 mkdir -p "${out}"
+echo "bootc-image-builder output directory ${out}"
 sudo podman run --rm --privileged \
   --security-opt label=type:unconfined_t \
   --pull=newer \
