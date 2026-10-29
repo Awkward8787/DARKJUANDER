@@ -21,7 +21,7 @@ else
 fi
 
 registry_auth_rejected() {
-  printf '%s\n' "$1" | grep -Eqi 'UNAUTHORIZED|cannot be authenticated|unauthenticated'
+  printf '%s\n' "$1" | grep -Eqi 'UNAUTHORIZED|cannot be authenticated|unauthenticated|requested access to the resource is denied'
 }
 
 if [[ -n "${sample}" ]]; then
