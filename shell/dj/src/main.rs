@@ -37,6 +37,7 @@ enum AuditCommand {
     Verify {
         path: PathBuf,
         /// Published ed25519 verifying key. Defaults to /run/dj-audit/audit.ed25519.pub.
+        /// A durable copy for offline verify is /var/lib/dj-audit/audit.ed25519.pub.
         #[arg(long)]
         verifying_key: Option<PathBuf>,
     },

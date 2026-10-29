@@ -7,10 +7,10 @@
 //! Truncating the log, emptying it, or appending after a truncate fails.
 //!
 //! The signing seed is not stored next to the log. `dj-auditd` holds it as a
-//! different user, keeps its own copy of the signed records, and signs a new
-//! head only when the appended record extends that copy. [`verify_file`] reads
-//! only the published verifying key. A writer who can edit the log cannot
-//! hide a truncated or rewritten chain without the signer's uid.
+//! different user, remembers only the last signed head, and signs a new head
+//! only when the appended record extends that head. [`verify_file`] reads only
+//! the published verifying key. A writer who can edit the log cannot hide a
+//! truncated or rewritten chain without the signer's uid.
 //!
 //! `umbrad` can still append. Offline verify cannot detect a rollback to an
 //! older log plus the checkpoint signed for that log. This is not a TPM.
@@ -37,7 +37,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 pub use signer::{
     expected_writer_uid, serve as serve_signer, spawn_test_signer, AuditPaths, TestSigner,
-    DEFAULT_SIGNER_SOCKET, DEFAULT_SIGNING_KEY, DEFAULT_VERIFYING_KEY,
+    DEFAULT_SIGNER_SOCKET, DEFAULT_SIGNING_KEY, DEFAULT_VERIFYING_KEY, DURABLE_VERIFYING_KEY,
 };
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -884,14 +884,17 @@ mod tests {
             "scrubbed chain was signed: {err}"
         );
 
-        let copy = fs::read_to_string(
-            harness
-                .signer
-                .key_path
-                .with_file_name("signed-records.jsonl"),
-        )
-        .unwrap();
-        assert!(copy.contains("exfiltrate.secrets"));
+        let tip_path = harness.signer.key_path.with_file_name("signed-tip.json");
+        let tip_text = fs::read_to_string(&tip_path).unwrap();
+        assert!(
+            !tip_text.contains("exfiltrate.secrets"),
+            "signer tip stored record bodies: {tip_text}"
+        );
+        assert!(!harness
+            .signer
+            .key_path
+            .with_file_name("signed-records.jsonl")
+            .exists());
         let log_text = fs::read_to_string(&harness.path).unwrap();
         assert!(log_text.contains("exfiltrate.secrets"));
         assert_eq!(harness.verify().unwrap().entries, 3);
@@ -956,6 +959,189 @@ mod tests {
         ] {
             assert!(unit.contains(line), "missing {line}");
         }
+    }
+
+    fn client_workers() -> usize {
+        fs::read_dir("/proc/self/task")
+            .unwrap()
+            .filter(|entry| {
+                let Ok(entry) = entry else {
+                    return false;
+                };
+                fs::read_to_string(entry.path().join("comm"))
+                    .map(|comm| comm.trim() == "dj-audit-client")
+                    .unwrap_or(false)
+            })
+            .count()
+    }
+
+    #[test]
+    fn connection_flood_does_not_block_signing() {
+        let harness = Harness::new();
+        let log = harness.open();
+        drop(log);
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        assert_eq!(client_workers(), 0, "a probe connection left a worker");
+
+        let mut held = Vec::new();
+        for _ in 0..40 {
+            held.push(
+                std::os::unix::net::UnixStream::connect(&harness.signer.paths.signer_socket)
+                    .unwrap(),
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let workers = client_workers();
+        assert!(
+            workers <= signer::MAX_INFLIGHT_CLIENTS,
+            "flood spawned {workers} workers, cap is {}",
+            signer::MAX_INFLIGHT_CLIENTS
+        );
+
+        let genesis: Record = serde_json::from_str(
+            fs::read_to_string(&harness.path)
+                .unwrap()
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        let next = build_record(genesis.seq + 1, &genesis.hash, event("during-flood"));
+        let client = signer::SignerClient::new(&harness.signer.paths.signer_socket);
+        sign_before_timeout(&client, &next);
+        let after = build_record(next.seq + 1, &next.hash, event("after-flood"));
+        sign_before_timeout(&client, &after);
+        drop(held);
+    }
+
+    #[test]
+    fn rejected_peer_flood_does_not_spawn_workers() {
+        let signer = signer::spawn_test_signer_for(u32::MAX).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        assert_eq!(client_workers(), 0);
+        let mut held = Vec::new();
+        for _ in 0..40 {
+            held.push(
+                std::os::unix::net::UnixStream::connect(&signer.paths.signer_socket).unwrap(),
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(client_workers(), 0, "rejected peers were handed to workers");
+        let client = signer::SignerClient::new(&signer.paths.signer_socket);
+        let started = std::time::Instant::now();
+        let mut rejection = None;
+        while started.elapsed() < std::time::Duration::from_secs(1) {
+            match client.sign_record(&build_record(0, GENESIS, event("nope"))) {
+                Ok(_) => panic!("rejected peer received a signature"),
+                Err(err) if err.to_string().contains("peer uid") => {
+                    rejection = Some(err.to_string());
+                    break;
+                }
+                Err(err) if transient_signer_error(&err) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(err) => panic!("unexpected signer error during rejected flood: {err}"),
+            }
+        }
+        assert!(
+            rejection.is_some(),
+            "rejected flood stalled a later client for {:?}",
+            started.elapsed()
+        );
+        drop(held);
+    }
+
+    fn transient_signer_error(err: &AuditError) -> bool {
+        let text = err.to_string();
+        text.contains("busy")
+            || text.contains("timed out")
+            || text.contains("Broken pipe")
+            || text.contains("Connection reset")
+            || text.contains("closed the socket")
+    }
+
+    fn sign_before_timeout(client: &signer::SignerClient, record: &Record) {
+        let started = std::time::Instant::now();
+        while started.elapsed() < std::time::Duration::from_secs(1) {
+            match client.sign_record(record) {
+                Ok(_) => return,
+                Err(err) if transient_signer_error(&err) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(err) => panic!("signer failed during the flood: {err}"),
+            }
+        }
+        panic!("flood blocked signing for {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn signer_keeps_only_the_last_record() {
+        let harness = Harness::new();
+        let log = harness.open();
+        log.append(event("exfiltrate.secrets")).unwrap();
+        log.append(event("after")).unwrap();
+        drop(log);
+        let key_dir = harness.signer.key_path.parent().unwrap().to_path_buf();
+        assert!(!key_dir.join("signed-records.jsonl").exists());
+        let tip: Value =
+            serde_json::from_str(&fs::read_to_string(key_dir.join("signed-tip.json")).unwrap())
+                .unwrap();
+        assert_eq!(tip["seq"], 2);
+        assert_eq!(tip.as_object().unwrap().len(), 3);
+        assert!(!tip.to_string().contains("exfiltrate.secrets"));
+
+        let log_text = fs::read_to_string(&harness.path).unwrap();
+        fs::write(key_dir.join("signed-records.jsonl"), &log_text).unwrap();
+        fs::remove_file(key_dir.join("signed-tip.json")).unwrap();
+        drop(harness);
+
+        let signer = signer::spawn_test_signer_in(&key_dir, signer::current_uid()).unwrap();
+        assert!(
+            !key_dir.join("signed-records.jsonl").exists(),
+            "legacy chain copy was kept"
+        );
+        let tip: Value =
+            serde_json::from_str(&fs::read_to_string(key_dir.join("signed-tip.json")).unwrap())
+                .unwrap();
+        assert_eq!(tip["seq"], 2);
+        let err = signer::SignerClient::new(&signer.paths.signer_socket)
+            .sign_record(&build_record(0, GENESIS, event("reset")))
+            .unwrap_err();
+        assert!(err.to_string().contains("refusing"), "{err}");
+        let records: Vec<Record> = log_text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let last = records.last().unwrap();
+        let next = build_record(last.seq + 1, &last.hash, event("extends"));
+        signer::SignerClient::new(&signer.paths.signer_socket)
+            .sign_record(&next)
+            .unwrap();
+    }
+
+    #[test]
+    fn durable_verifying_key_is_persisted() {
+        let signer = signer::spawn_test_signer_with_separate_public().unwrap();
+        let durable = signer.key_path.with_file_name("audit.ed25519.pub");
+        assert_ne!(durable, signer.paths.verifying_key);
+        let durable_bytes = fs::read(&durable).unwrap();
+        assert_eq!(
+            durable_bytes,
+            fs::read(&signer.paths.verifying_key).unwrap()
+        );
+        assert_eq!(durable_bytes.len(), 32);
+        let mode = fs::metadata(&durable).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o644);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        let log = AuditLog::open(&path, &signer.paths).unwrap();
+        log.append(event("kept")).unwrap();
+        drop(log);
+        assert_eq!(verify_file(&path, &durable).unwrap().entries, 2);
+        let readme = fs::read_to_string(repo_path("README.md")).unwrap();
+        assert!(readme.contains(DURABLE_VERIFYING_KEY), "{readme}");
+        let base = fs::read_to_string(repo_path("docs/BASE.md")).unwrap();
+        assert!(base.contains("audit.ed25519.pub"), "{base}");
     }
 
     #[test]
