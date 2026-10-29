@@ -45,7 +45,11 @@ case "$(uname -m)" in
   aarch64|arm64) console="console=ttyAMA0,115200 earlycon" ;;
   *) console="console=tty0 console=ttyS0,115200" ;;
 esac
-boot_units="systemd.mask=NetworkManager-wait-online.service systemd.mask=plymouth-quit-wait.service systemd.mask=plymouth-start.service"
+# Fedora's device job timeout is 45s. Under TCG, udev is still enumerating
+# /boot and ttyAMA0 at that mark, local-fs fails, and the VM drops to
+# emergency mode with a locked root shell. A longer timeout does not delay
+# a fast boot; it only lets a slow one finish.
+boot_units="systemd.default_device_timeout_sec=300 systemd.default_timeout_start_sec=300 systemd.mask=NetworkManager-wait-online.service systemd.mask=plymouth-quit-wait.service systemd.mask=plymouth-start.service"
 cat > "${cfg}" << EOF
 [[customizations.user]]
 name = "dj"

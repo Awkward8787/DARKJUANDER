@@ -58,8 +58,8 @@ jobs:
             platform: linux/arm64
             qemu_pkg: qemu-system-arm
             firmware_pkg: qemu-efi-aarch64
-            # No KVM on this runner. 20 minutes is the hard smoke cap.
-            smoke_timeout: "1200"
+            # No KVM on this runner. Hard cap, under an hour.
+            smoke_timeout: "2400"
           - arch: x86_64
             runner: ubuntu-24.04
             platform: linux/amd64
