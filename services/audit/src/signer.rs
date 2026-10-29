@@ -586,6 +586,22 @@ fn check_tip(tip: SignedTip) -> Result<SignedTip, AuditError> {
 }
 
 fn store_signed_tip(path: &Path, tip: &SignedTip) -> Result<(), AuditError> {
+    store_signed_tip_synced(path, tip, &default_directory_sync)
+}
+
+fn default_directory_sync(dir: &Path) -> Result<(), AuditError> {
+    File::open(dir)?.sync_all().map_err(AuditError::Io)
+}
+
+/// Writes the tip and fsyncs its parent directory.
+///
+/// `sync_directory` is that fsync. Production passes [`default_directory_sync`].
+/// The rename is durable only when this hook runs.
+fn store_signed_tip_synced(
+    path: &Path,
+    tip: &SignedTip,
+    sync_directory: &dyn Fn(&Path) -> Result<(), AuditError>,
+) -> Result<(), AuditError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -598,13 +614,11 @@ fn store_signed_tip(path: &Path, tip: &SignedTip) -> Result<(), AuditError> {
         file.sync_all()?;
     }
     fs::rename(&tmp, path)?;
-    // The file sync above makes the bytes durable. The rename itself is only
-    // durable once the parent directory is synced.
     let dir = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
-    File::open(dir)?.sync_all()?;
+    sync_directory(dir)?;
     Ok(())
 }
 
@@ -697,7 +711,20 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("signed-tip.json");
-        store_signed_tip(&path, &sample_tip(4)).unwrap();
+        let synced = std::sync::atomic::AtomicU32::new(0);
+        let synced_dir = std::sync::Mutex::new(PathBuf::new());
+        store_signed_tip_synced(&path, &sample_tip(4), &|parent| {
+            synced.fetch_add(1, Ordering::SeqCst);
+            *synced_dir.lock().expect("sync path") = parent.to_path_buf();
+            default_directory_sync(parent)
+        })
+        .unwrap();
+        assert_eq!(
+            synced.load(Ordering::SeqCst),
+            1,
+            "removing the directory fsync leaves this at 0"
+        );
+        assert_eq!(synced_dir.lock().expect("sync path").as_path(), dir);
         let loaded = load_signed_tip(&path).unwrap().unwrap();
         assert_eq!(loaded.seq, 4);
         assert!(!path.with_extension("json.tmp").exists());

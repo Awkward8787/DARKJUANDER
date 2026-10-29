@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck openssl
-          shellcheck scripts/*.sh
+          shellcheck scripts/*.sh image/*.sh
           ./scripts/test-package-release-assets.sh
           ./scripts/test-iso-depsolve.sh
           ./scripts/test-smoke-marker.sh
@@ -49,3 +49,35 @@ jobs:
             echo "incomplete kernel config should fail"
             exit 1
           fi
+
+  branding:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: palette, assets, and brand build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin
+          python3 -m venv /tmp/brand-venv
+          /tmp/brand-venv/bin/pip install fonttools pillow
+          PATH="/tmp/brand-venv/bin:${PATH}" ./scripts/check-branding.sh --no-png
+          PATH="/tmp/brand-venv/bin:${PATH}" ./scripts/check-branding.sh --check-social
+
+  image-branding:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: podman build and initramfs check
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+          mkdir -p out/stage
+          printf '#!/bin/sh\necho stub\n' > out/stage/umbrad
+          cp out/stage/umbrad out/stage/dj
+          cp out/stage/umbrad out/stage/dj-auditd
+          chmod 0755 out/stage/umbrad out/stage/dj out/stage/dj-auditd
+          sudo podman build --network=host -f image/Containerfile -t localhost/dj-base:branding-ci .

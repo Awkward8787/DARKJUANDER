@@ -8,7 +8,7 @@ PRD section 14 is unanswered. These defaults are reversible. They are not a deci
 | 2. Desktop | None in this PR. When one is required, start from the Fedora bootc GNOME base, because that is the bootc desktop with the most existing image work. |
 | 3. Business model | Unset. Nothing in the tree depends on it. |
 | 4. Hardware partners | VM and later install only. |
-| 5. Trademark | No search was done. DARKJUANDER and UMBRA are working names. |
+| 5. Trademark | No attorney search was done. `branding/research/name-check.md` is a first pass, not clearance. DARKJUANDER is not a registered trademark. UMBRA stays a working component name. |
 | 6. Apple silicon | A VM is the target. Bare metal x86_64 is the later host. Asahi is out of this PR. |
 | 7. Cloud providers | None. The image config is local-only. The demo config has a mock cloud engine so the hard rule can be tested. |
 | 8. Which of Jaamal's agents move first | Unknown. The scenes use synthetic agents. |

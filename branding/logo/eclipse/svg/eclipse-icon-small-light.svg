@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512.0 512.0" width="512" height="512"><title>DARKJUANDER</title>
+
+<g transform="translate(0.00,0.00) scale(1.00000)"><mask id="ecl6c" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512"><rect width="512" height="512" fill="#fff"/><circle cx="224.0" cy="279.0" r="186" fill="#000"/></mask>
+<circle cx="288.0" cy="233.0" r="168" fill="#5B48D6" mask="url(#ecl6c)"/>
+<circle cx="224.0" cy="279.0" r="168" fill="#0A0C11"/>
+<circle cx="216.0" cy="287.0" r="46" fill="#F4F5F8"/></g>
+</svg>

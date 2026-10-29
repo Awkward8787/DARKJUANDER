@@ -409,11 +409,11 @@ pub fn read_key_source(path: Option<&Path>) -> Result<Secret, ProviderError> {
     Ok(Secret::new(text))
 }
 
-/// Official consumer-subscription sign-in. Only OpenAI documents one.
 /// Where `dj provider test` may send the bearer key.
 ///
-/// The preset host and loopback are allowed. Any other host needs
-/// `allow_untrusted_host`. This returns before a socket is opened.
+/// Loopback may be http. Every other host must be https. The preset host
+/// is allowed; any other https host needs `allow_untrusted_host`. This
+/// returns before a socket is opened.
 pub fn probe_target_allowed(
     provider_id: &str,
     url: &str,
@@ -424,7 +424,12 @@ pub fn probe_target_allowed(
             "refusing a provider URL that embeds credentials".into(),
         ));
     }
-    let host = url_host(url)?;
+    let (scheme, host) = url_origin(url)?;
+    if scheme == "http" && !is_loopback(&host) {
+        return Err(ProviderError::Invalid(format!(
+            "refusing cleartext provider URL for {host}"
+        )));
+    }
     if is_loopback(&host) {
         return Ok(());
     }
@@ -440,11 +445,24 @@ pub fn probe_target_allowed(
     )))
 }
 
+fn url_origin(url: &str) -> Result<(&str, String), ProviderError> {
+    let (scheme, rest) = if let Some(rest) = url.strip_prefix("https://") {
+        ("https", rest)
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        ("http", rest)
+    } else {
+        return Err(ProviderError::Invalid(
+            "provider URL must be http or https".into(),
+        ));
+    };
+    Ok((scheme, url_host_authority(rest)?))
+}
+
 fn url_host(url: &str) -> Result<String, ProviderError> {
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .ok_or_else(|| ProviderError::Invalid("provider URL must be http or https".into()))?;
+    Ok(url_origin(url)?.1)
+}
+
+fn url_host_authority(rest: &str) -> Result<String, ProviderError> {
     let authority = rest.split('/').next().unwrap_or("");
     if let Some(host) = authority.strip_prefix('[') {
         let end = host
@@ -534,6 +552,11 @@ mod tests {
     fn probe_base_url_stays_on_the_preset_host_or_loopback() {
         assert!(probe_target_allowed("xai", "https://api.x.ai/v1", false).is_ok());
         assert!(probe_target_allowed("openai", "https://api.openai.com/v1", false).is_ok());
+        let clear = probe_target_allowed("xai", "http://api.x.ai/v1", false).unwrap_err();
+        assert!(clear.to_string().contains("cleartext"), "{clear}");
+        assert!(probe_target_allowed("xai", "http://api.x.ai/v1", true).is_err());
+        assert!(probe_target_allowed("openai", "http://api.openai.com/v1", true).is_err());
+        assert!(probe_target_allowed("xai", "http://collector.invalid/v1", true).is_err());
         assert!(probe_target_allowed("xai", "http://127.0.0.1:9/v1", false).is_ok());
         assert!(probe_target_allowed("xai", "http://[::1]:9/v1", false).is_ok());
         let evil = probe_target_allowed("xai", "https://collector.invalid/v1", false).unwrap_err();

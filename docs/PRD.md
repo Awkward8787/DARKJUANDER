@@ -9,7 +9,7 @@ date: "Draft v0.2, October 27, 2026"
 
 | Field | Value |
 |---|---|
-| Product | DARKJUANDER (working name, trademark not yet checked) |
+| Product | DARKJUANDER (working name. `branding/research/name-check.md` is a first pass, not clearance. Not a registered trademark.) |
 | Owner | Anthony Jaamal Jones ("Jaamal"), Vibe Virtue Enterprise LLC, Valdosta, GA |
 | Status | Draft v0.2, for review (v0.2 adds the UMBRA neural core, Section 7) |
 | Date | October 27, 2026 |

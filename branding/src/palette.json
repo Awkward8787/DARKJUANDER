@@ -1,0 +1,57 @@
+{
+  "_note": "Single source of truth for DARKJUANDER colors. scripts/build.py reads this file.",
+  "brand": {
+    "umbra": "#0A0C11",
+    "violet": "#9D8CFF",
+    "violet_deep": "#5B48D6"
+  },
+  "neutral": {
+    "umbra_950": "#0A0C11",
+    "umbra_900": "#11141B",
+    "umbra_800": "#1B2029",
+    "umbra_700": "#2A2F3D",
+    "umbra_600": "#3A4252",
+    "umbra_500": "#5A6377",
+    "ash_400": "#8A93A6",
+    "ash_200": "#C3C9D6",
+    "lumen_100": "#E6E9F0",
+    "lumen_50": "#F4F5F8"
+  },
+  "semantic_dark": {
+    "ok": "#3DD68C",
+    "warn": "#F5B841",
+    "danger": "#FF5C5C",
+    "info": "#4CB8FF"
+  },
+  "semantic_light": {
+    "ok": "#0E7A47",
+    "warn": "#8A5A00",
+    "danger": "#C22B2B",
+    "info": "#0B6BB3"
+  },
+  "terminal": {
+    "background": "#0A0C11",
+    "foreground": "#E6E9F0",
+    "cursor": "#9D8CFF",
+    "selection_bg": "#2A2F3D",
+    "selection_fg": "#F4F5F8",
+    "ansi": [
+      "#11141B",
+      "#FF5C5C",
+      "#3DD68C",
+      "#F5B841",
+      "#4CB8FF",
+      "#9D8CFF",
+      "#3ED6D0",
+      "#C3C9D6",
+      "#7A8398",
+      "#FF8585",
+      "#6FE6AA",
+      "#FFD27A",
+      "#82CEFF",
+      "#BDB2FF",
+      "#7FE8E3",
+      "#F4F5F8"
+    ]
+  }
+}
