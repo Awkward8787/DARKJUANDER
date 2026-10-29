@@ -42,24 +42,6 @@ RUN mkdir -p /usr/lib/bootc/install \
     && printf '%s\n' '[install.filesystem.root]' 'type = "xfs"' \
       > /usr/lib/bootc/install/00-darkjuander.toml
 
-# The Anaconda ISO build depsolves from the image's dnf repos. Fedora bootc
-# ships those repos disabled. Enable them. bootc is still how this system updates.
-RUN mkdir -p /etc/yum.repos.d \
-    && if ls /etc/yum.repos.d/*.repo >/dev/null 2>&1; then \
-         sed -i -E 's/^(enabled[[:space:]]*=[[:space:]]*)0/\11/' /etc/yum.repos.d/*.repo; \
-       fi \
-    && if ! grep -RqsE '^enabled[[:space:]]*=[[:space:]]*1' /etc/yum.repos.d; then \
-         printf '%s\n' \
-           '[fedora]' \
-           'name=Fedora 45 Everything' \
-           'metalink=https://mirrors.fedoraproject.org/metalink?repo=fedora-45&arch=$basearch' \
-           'enabled=1' \
-           'countme=0' \
-           'gpgcheck=1' \
-           'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-$basearch' \
-           > /etc/yum.repos.d/fedora-darkjuander.repo; \
-       fi
-
 RUN systemctl enable dj-auditd.service umbrad.service nftables.service
 
 LABEL org.opencontainers.image.title="dj-base" \

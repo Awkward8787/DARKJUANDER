@@ -109,24 +109,19 @@ jobs:
             -t "localhost/dj-base:${{ steps.ver.outputs.version }}" \
             .
 
-      - name: qcow2 and anaconda iso
+      - name: qcow2
+        id: qcow2
         run: |
           ./scripts/build-release-disk.sh \
             "localhost/dj-base:${{ steps.ver.outputs.version }}" \
-            out/disk
+            out/disk qcow2
           mkdir -p dist/payload
           ver="${{ steps.ver.outputs.version }}"
           arch="${{ matrix.arch }}"
-          mapfile -t qcows < <(find out/disk -type f -name '*.qcow2')
-          mapfile -t isos < <(find out/disk -type f -name '*.iso')
+          mapfile -t qcows < <(find out/disk/qcow2 -type f -name '*.qcow2')
           test "${#qcows[@]}" -ge 1
-          test "${#isos[@]}" -ge 1
           zstd -T0 -15 -f "${qcows[0]}" -o "dist/payload/darkjuander-${ver}-${arch}.qcow2.zst"
-          zstd -T0 -15 -f "${isos[0]}" -o "dist/payload/darkjuander-${ver}-${arch}.iso.zst"
           cp -f "${qcows[0]}" dist/smoke.qcow2
-
-      - name: checksums
-        run: |
           mapfile -t files < <(find dist/payload -type f | sort)
           ./scripts/package-release-assets.sh dist/release "${files[@]}"
 
@@ -137,6 +132,7 @@ jobs:
 
       - name: sign SHA256SUMS
         id: sign
+        if: steps.qcow2.outcome == 'success'
         continue-on-error: true
         run: |
           if ! command -v cosign >/dev/null; then
@@ -148,15 +144,19 @@ jobs:
             dist/release/SHA256SUMS
           echo "cosign keyless signed SHA256SUMS" | tee dist/release/COSIGN.txt
 
-      - name: upload release files
-        if: always()
+      - name: upload qcow2
+        if: steps.qcow2.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: darkjuander-${{ matrix.arch }}
-          if-no-files-found: warn
+          if-no-files-found: error
           path: dist/release/**
 
       - name: qemu smoke
+        id: smoke
+        if: steps.qcow2.outcome == 'success'
+        env:
+          SMOKE_TIMEOUT_SECS: "2400"
         run: ./scripts/smoke-qemu.sh dist/smoke.qcow2
 
       - name: upload smoke log
@@ -169,8 +169,33 @@ jobs:
             dist/smoke.qcow2.serial.log
             dist/smoke.qcow2.smoke.txt
 
+      - name: anaconda iso
+        id: iso
+        if: always() && steps.qcow2.outcome == 'success'
+        continue-on-error: true
+        run: |
+          ./scripts/build-release-disk.sh \
+            "localhost/dj-base:${{ steps.ver.outputs.version }}" \
+            out/disk anaconda-iso
+          mkdir -p dist/iso-payload
+          ver="${{ steps.ver.outputs.version }}"
+          arch="${{ matrix.arch }}"
+          mapfile -t isos < <(find out/disk/anaconda-iso -type f -name '*.iso')
+          test "${#isos[@]}" -ge 1
+          zstd -T0 -15 -f "${isos[0]}" -o "dist/iso-payload/darkjuander-${ver}-${arch}.iso.zst"
+          mapfile -t files < <(find dist/iso-payload -type f | sort)
+          ./scripts/package-release-assets.sh dist/iso-release "${files[@]}"
+
+      - name: upload iso
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: darkjuander-iso-${{ matrix.arch }}
+          if-no-files-found: warn
+          path: dist/iso-release/**
+
       - name: push arch image
-        if: steps.ver.outputs.publish == 'true'
+        if: steps.ver.outputs.publish == 'true' && steps.smoke.outcome == 'success'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
           remote="ghcr.io/awkward8787/darkjuander:${{ steps.ver.outputs.version }}-${{ matrix.arch }}"
@@ -200,6 +225,12 @@ jobs:
               cat dist/release/COSIGN.txt
               echo '```'
             fi
+            echo
+            echo "qcow2 step: ${{ steps.qcow2.outcome }}"
+            echo "smoke step: ${{ steps.smoke.outcome }}"
+            echo "iso step: ${{ steps.iso.outcome }}"
+            echo
+            echo "The qcow2 and the GHCR image leave Fedora dnf repos disabled. The Anaconda ISO, when it builds, is made from a throwaway image that enables those repos for the installer depsolve. A system installed from that ISO has them enabled. bootc is still the update path."
           } >> "${GITHUB_STEP_SUMMARY}"
 
   publish:

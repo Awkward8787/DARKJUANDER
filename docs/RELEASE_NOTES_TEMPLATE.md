@@ -19,6 +19,13 @@ uploads workflow artifacts and does not publish a release or move `:latest`.
 - The console user `dj` uses the published password `darkjuander`. It is not
   a secret. `sshd` is disabled and inbound connections are dropped. Change
   the password with `passwd` before you add a network path you do not control.
+- The qcow2 and `ghcr.io/awkward8787/darkjuander` leave Fedora's dnf
+  repositories disabled. Update those systems with `bootc`, not `dnf update`.
+- The Anaconda ISO is built from a throwaway image that enables those
+  repositories so the installer can depsolve. A system installed from the
+  ISO has the Fedora repositories enabled. `dnf` can then see Fedora
+  mirrors. That is not the supported update path. Packages installed with
+  `dnf` can conflict with a later `bootc switch` or `bootc upgrade`.
 - Runner smoke result for this build:
 
 ```
