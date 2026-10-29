@@ -105,7 +105,12 @@ import sys
 import time
 
 sys.path.insert(0, os.environ["SMOKE_LIB"])
-from smoke_marker import LoginDriver, multi_user_ok, socket_ok as marker_ok
+from smoke_marker import (
+    LoginDriver,
+    multi_user_ok,
+    password_expired,
+    socket_ok as marker_ok,
+)
 
 # systemd colors the console, so "Reached target multi-user.target" is not
 # contiguous bytes. Match the phrase after stripping those sequences.
@@ -198,15 +203,17 @@ finally:
         proc.wait(timeout=15)
     log.close()
 
+expired = password_expired(text)
 lines = [
     f"multi-user: {'yes' if multi else 'no'}",
     f"umbrad-socket: {'yes' if socket_ok else 'no'}",
     f"login-reached: {'yes' if login.sent_user else 'no'}",
+    f"password-expired: {'yes' if expired else 'no'}",
 ]
-text = "\n".join(lines) + "\n"
-sys.stderr.write(text)
-open(result_path, "w", encoding="utf-8").write(text)
-sys.exit(0 if multi and socket_ok else 1)
+result = "\n".join(lines) + "\n"
+sys.stderr.write(result)
+open(result_path, "w", encoding="utf-8").write(result)
+sys.exit(0 if multi and socket_ok and expired else 1)
 PY
 status=$?
 echo "smoke exit ${status}"

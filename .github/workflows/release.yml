@@ -15,6 +15,10 @@ on:
         description: Publish only when this is false and the ref is a v* tag. Default is a dry run.
         type: boolean
         default: true
+      cosign_probe:
+        description: From main only, sign ghcr.io/awkward8787/darkjuander-ci-probe. Never the release image. Default off.
+        type: boolean
+        default: false
   push:
     tags:
       - "v*.*.*"
@@ -31,6 +35,7 @@ on:
       - "scripts/render-release-notes.sh"
       - "scripts/cosign-ghcr-auth-check.sh"
       - "scripts/assert-cosign-docker-config.sh"
+      - "scripts/cosign-ci-probe.sh"
       - "image/Containerfile"
       - "image/console-password.txt"
       - "image/systemd/dj-expire-password.service"
@@ -324,6 +329,9 @@ jobs:
       startsWith(github.ref, 'refs/tags/v') &&
       (github.event_name != 'workflow_dispatch' || inputs.dry_run == false)
     runs-on: ubuntu-24.04
+    concurrency:
+      group: publish-ghcr-latest
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write
@@ -340,7 +348,7 @@ jobs:
         run: ./scripts/release-version.sh
 
       - name: install tools
-        run: sudo apt-get update && sudo apt-get install -y podman
+        run: sudo apt-get update && sudo apt-get install -y podman skopeo
 
       - name: download artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -385,6 +393,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           printf '%s\n' "${GH_TOKEN}" | sudo podman login ghcr.io -u "${GH_ACTOR}" --password-stdin
+          stage="ci-${GITHUB_RUN_ID}"
+          mkdir -p dist
           mapfile -t tars < <(find dist/parts -name dj-base.tar | sort)
           test "${#tars[@]}" -eq 2
           for tar in "${tars[@]}"; do
@@ -398,18 +408,19 @@ jobs:
             sudo podman load -i "${tar}"
             got=$(sudo podman image inspect --format '{{.Id}}' "localhost/dj-base:${ver}")
             test "${got}" = "${want}"
-            remote="ghcr.io/awkward8787/darkjuander:${ver}-${arch}"
+            remote="ghcr.io/awkward8787/darkjuander:${stage}-${arch}"
             sudo podman tag "localhost/dj-base:${ver}" "${remote}"
-            sudo podman push "${remote}"
+            sudo podman push --digestfile "dist/${arch}.digest" "${remote}"
+            grep -Eq '^sha256:[0-9a-f]{64}$' "dist/${arch}.digest"
           done
-          sudo podman manifest create "localhost/darkjuander:${VERSION}"
-          sudo podman manifest add "localhost/darkjuander:${VERSION}" \
-            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-aarch64"
-          sudo podman manifest add "localhost/darkjuander:${VERSION}" \
-            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-x86_64"
+          sudo podman manifest create "localhost/darkjuander:${stage}"
+          sudo podman manifest add "localhost/darkjuander:${stage}" \
+            "docker://ghcr.io/awkward8787/darkjuander:${stage}-aarch64"
+          sudo podman manifest add "localhost/darkjuander:${stage}" \
+            "docker://ghcr.io/awkward8787/darkjuander:${stage}-x86_64"
           sudo podman manifest push --all --digestfile dist/index.digest \
-            "localhost/darkjuander:${VERSION}" \
-            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}"
+            "localhost/darkjuander:${stage}" \
+            "docker://ghcr.io/awkward8787/darkjuander:${stage}"
           grep -Eq '^sha256:[0-9a-f]{64}$' dist/index.digest
 
       # sudo podman login stores credentials in root's containers auth file.
@@ -423,34 +434,55 @@ jobs:
         run: |
           printf '%s\n' "${GH_TOKEN}" | cosign login ghcr.io --username "${GH_ACTOR}" --password-stdin
           ./scripts/assert-cosign-docker-config.sh
-          digest=$(tr -d '\r\n' < dist/index.digest)
           identity="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}"
-          cosign sign --yes "ghcr.io/awkward8787/darkjuander@${digest}"
-          cosign verify \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "${identity}" \
-            "ghcr.io/awkward8787/darkjuander@${digest}"
+          for file in dist/aarch64.digest dist/x86_64.digest dist/index.digest; do
+            digest=$(tr -d '\r\n' < "${file}")
+            cosign sign --yes "ghcr.io/awkward8787/darkjuander@${digest}"
+            cosign verify \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity "${identity}" \
+              "ghcr.io/awkward8787/darkjuander@${digest}"
+          done
+          digest=$(tr -d '\r\n' < dist/index.digest)
           printf 'digest=%s\n' "${digest}" >> "${GITHUB_OUTPUT}"
 
-      - name: move latest to the signed digest
-        id: latest
+      - name: tag the signed digests
+        id: tag
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          sudo podman manifest create "localhost/darkjuander-latest"
-          sudo podman manifest add "localhost/darkjuander-latest" \
-            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-aarch64"
-          sudo podman manifest add "localhost/darkjuander-latest" \
-            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-x86_64"
-          sudo podman manifest push --all --digestfile dist/latest.digest \
-            "localhost/darkjuander-latest" \
-            "docker://ghcr.io/awkward8787/darkjuander:latest"
           index=$(tr -d '\r\n' < dist/index.digest)
-          latest=$(tr -d '\r\n' < dist/latest.digest)
-          if [[ "${latest}" != "${index}" ]]; then
-            echo "latest digest ${latest} is not the signed digest ${index}" >&2
+          seen=$(sudo skopeo inspect --format '{{.Digest}}' \
+            "docker://ghcr.io/awkward8787/darkjuander@${index}")
+          if [[ "${seen}" != "${index}" ]]; then
+            echo "signed index ${index} is not what GHCR has (${seen})" >&2
             exit 1
           fi
+          for arch in aarch64 x86_64; do
+            digest=$(tr -d '\r\n' < "dist/${arch}.digest")
+            sudo skopeo copy --preserve-digests \
+              "docker://ghcr.io/awkward8787/darkjuander@${digest}" \
+              "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-${arch}"
+          done
+          sudo skopeo copy --all --preserve-digests \
+            "docker://ghcr.io/awkward8787/darkjuander@${index}" \
+            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}"
+          tagged=$(sudo skopeo inspect --format '{{.Digest}}' \
+            "docker://ghcr.io/awkward8787/darkjuander:${VERSION}")
+          if [[ "${tagged}" != "${index}" ]]; then
+            echo "version tag digest ${tagged} is not the signed digest ${index}" >&2
+            exit 1
+          fi
+          sudo skopeo copy --all --preserve-digests \
+            "docker://ghcr.io/awkward8787/darkjuander@${index}" \
+            "docker://ghcr.io/awkward8787/darkjuander:latest"
+
+      - name: logout registries
+        if: always()
+        run: |
+          # cosign v2.5.3 has no logout command. The docker config is the file it wrote.
+          rm -f "${HOME}/.docker/config.json"
+          sudo podman logout ghcr.io || true
 
       - name: github release
         id: release
@@ -470,15 +502,14 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: publish did not finish
-        if: always() && (steps.sign.outcome != 'success' || steps.latest.outcome != 'success' || steps.release.outcome != 'success')
+        if: always() && (steps.sign.outcome != 'success' || steps.tag.outcome != 'success' || steps.release.outcome != 'success')
         run: |
-          echo "Publish did not finish. The version tag may exist before its signature was verified. :latest is moved only after verify. This job is a failure." >&2
+          echo "Publish did not finish. Version tags and :latest are applied only after the index and per-arch digests verify. This job is a failure." >&2
           exit 1
 
-      - name: logout registries
+      - name: logout registries again
         if: always()
         run: |
-          cosign logout ghcr.io || true
           rm -f "${HOME}/.docker/config.json"
           sudo podman logout ghcr.io || true
 
@@ -512,14 +543,16 @@ jobs:
       - name: logout registries
         if: always()
         run: |
-          cosign logout ghcr.io || true
+          # cosign v2.5.3 has no logout command. Removing this file drops its GHCR credential.
           rm -f "${HOME}/.docker/config.json"
 
-  # Manual dry run only. Signs a scratch package, never darkjuander:latest
-  # or a v* tag. Does not run on pull requests.
+  # Opt-in from main only. Signs darkjuander-ci-probe, never the release
+  # image. Its Fulcio identity is refs/heads/main, which does not match
+  # the SHA256SUMS identity (.../release.yml@refs/tags/v) in INSTALL.md.
+  # Releases are on hold: do not dispatch this until that hold is lifted.
   cosign-probe:
     name: cosign probe
-    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.cosign_probe
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -541,28 +574,11 @@ jobs:
         env:
           GH_ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ref="ghcr.io/awkward8787/darkjuander-ci-probe:${GITHUB_RUN_ID}"
-          work=$(mktemp -d)
-          printf 'probe\n' > "${work}/probe.txt"
-          printf '%s\n' 'FROM scratch' 'COPY probe.txt /probe.txt' > "${work}/Containerfile"
-          printf '%s\n' "${GH_TOKEN}" | sudo podman login ghcr.io -u "${GH_ACTOR}" --password-stdin
-          sudo podman build -f "${work}/Containerfile" -t "${ref}" "${work}"
-          sudo podman push --digestfile dist/probe.digest "${ref}"
-          grep -Eq '^sha256:[0-9a-f]{64}$' dist/probe.digest
-          printf '%s\n' "${GH_TOKEN}" | cosign login ghcr.io --username "${GH_ACTOR}" --password-stdin
-          ./scripts/assert-cosign-docker-config.sh
-          digest=$(tr -d '\r\n' < dist/probe.digest)
-          identity="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}"
-          cosign sign --yes "ghcr.io/awkward8787/darkjuander-ci-probe@${digest}"
-          cosign verify \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "${identity}" \
-            "ghcr.io/awkward8787/darkjuander-ci-probe@${digest}"
+          PROBE_REF: ghcr.io/awkward8787/darkjuander-ci-probe:${{ github.run_id }}
+        run: ./scripts/cosign-ci-probe.sh
 
       - name: logout registries
         if: always()
         run: |
-          cosign logout ghcr.io || true
           rm -f "${HOME}/.docker/config.json"
           sudo podman logout ghcr.io || true

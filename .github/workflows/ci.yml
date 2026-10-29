@@ -42,6 +42,8 @@ jobs:
           ./scripts/test-release-version.sh
           ./scripts/test-write-disk-config.sh
           ./scripts/test-cosign-ghcr-auth-check.sh
+          ./scripts/test-assert-cosign-docker-config.sh
+          ./scripts/test-cosign-ci-probe.sh
       - name: containerfile and kernel-config script
         run: |
           ./scripts/check-containerfile.sh

@@ -30,9 +30,9 @@ Release.
   nftables rules drop inbound connections.
 - Checksums are in `SHA256SUMS`. A `SHA256SUMS.cosign.bundle` is a keyless
   signature of that file when the publish job could obtain a GitHub OIDC
-  token. From v0.1.1 on, a tag publish signs the GHCR image the same way.
-  `v0.1.0` did not. `bootc` does not enforce that cosign signature unless
-  you configure a policy that does.
+  token. A tag publish signs the GHCR image the same way, except for
+  `v0.1.0`, which is unsigned. `bootc` does not enforce that cosign
+  signature unless you configure a policy that does.
 - The qcow2 and the GHCR container leave Fedora's dnf repositories disabled,
   which is how Fedora bootc ships them. Update that system with `bootc
   switch` or `bootc upgrade`, not `dnf update`.
@@ -77,7 +77,7 @@ When the release includes a cosign bundle:
 cosign verify-blob \
   --bundle SHA256SUMS.cosign.bundle \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/Awkward8787/DARKJUANDER/.github/workflows/release.yml@' \
+  --certificate-identity-regexp '^https://github.com/Awkward8787/DARKJUANDER/.github/workflows/release.yml@refs/tags/v' \
   SHA256SUMS
 ```
 
@@ -174,11 +174,11 @@ not create user `dj`.
 
 `v0.1.0` and the `:latest` tag that was published with it both point at
 `ghcr.io/awkward8787/darkjuander@sha256:a28c4d2f17fc3f02cdd59463641fbc875f240ba3e581de733016627613502009`.
-That image is unsigned. `v0.1.1` supersedes it. Do not `bootc switch` to
-`v0.1.0`. From `v0.1.1` on, `:latest` moves only after the version digest
-has been signed and verified.
+That image is unsigned. No newer tag has been published. Do not `bootc switch`
+to `v0.1.0` or to `:latest` until a later tag exists and its release notes
+say that tag's digest was signed.
 
-A later tag publish signs the GHCR image with keyless cosign. `bootc switch`
+A tag publish after this fix signs the GHCR image with keyless cosign. `bootc switch`
 uses bootc's own policy, which does not check that cosign signature unless
 you configure it to. Do not disable signature policy to get past a refusal
 unless that is a decision you mean to make.

@@ -6,7 +6,13 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 python3 - "$root" << 'PY'
 import sys
 sys.path.insert(0, sys.argv[1] + "/scripts")
-from smoke_marker import LoginDriver, multi_user_ok, probe_command, socket_ok
+from smoke_marker import (
+    LoginDriver,
+    multi_user_ok,
+    password_expired,
+    probe_command,
+    socket_ok,
+)
 
 cmd = probe_command("darkjuander")
 echoed = cmd + "[dj@fedora ~]$ "
@@ -35,5 +41,11 @@ assert drv.on_text("Retype new password: ") == b"Dj-Console-9k\n"
 typed = drv.on_text("[dj@fedora ~]$ ")
 assert typed is not None and b"UMBRAD_SOCKET_OK" not in typed
 assert b"UMBRAD_SOC" in typed and socket_ok(typed.decode()) is False
+plain = "darkjuander login: dj\nPassword: \n[dj@darkjuander ~]$ "
+if password_expired(plain):
+    raise SystemExit("a login without an expiry prompt must fail")
+forced = plain + "You are required to change your password immediately (administrator enforced).\n"
+if not password_expired(forced):
+    raise SystemExit("the forced password change must count")
 print("smoke-marker: ok")
 PY

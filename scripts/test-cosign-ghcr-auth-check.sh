@@ -78,5 +78,10 @@ run_case empty 1 '' fail
 run_case wrongreg 1 'ghcr.example.invalid: no such host' fail
 run_case verified 0 'no signatures found' fail
 run_case noconfig 10 'MANIFEST_UNKNOWN: manifest unknown' fail 0
+run_case mixed_unauth 10 'UNAUTHORIZED: nope
+MANIFEST_UNKNOWN: manifest unknown' fail
+run_case mixed_denied 10 'DENIED: permission_denied
+Error: no signatures found' fail
+run_case substring 10 'NOT_MANIFEST_UNKNOWN_X' fail
 
 echo "cosign-ghcr-auth-check: ok"

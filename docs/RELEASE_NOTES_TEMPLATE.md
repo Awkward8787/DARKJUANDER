@@ -12,13 +12,11 @@ uploads workflow artifacts and does not publish a release or move `:latest`.
   is a serial-console boot of that disk. It is not a UTM install.
 - Secure Boot is not enrolled. The disk is not signed. LUKS is not sealed
   to a TPM.
-- The publish job signs `SHA256SUMS` and, from v0.1.1 on, the GHCR image
-  digest for `ghcr.io/awkward8787/darkjuander:__VERSION__` with keyless
-  cosign. `v0.1.0` is
-  `ghcr.io/awkward8787/darkjuander@sha256:a28c4d2f17fc3f02cdd59463641fbc875f240ba3e581de733016627613502009`
-  and that image is unsigned. `v0.1.1` supersedes it. `bootc switch` does
-  not enforce the cosign signature unless a policy says so. Do not turn
-  signature checking off on a machine you depend on unless you accept that.
+- The publish job signs `SHA256SUMS` and the GHCR image digest for
+  `ghcr.io/awkward8787/darkjuander:__VERSION__` with keyless cosign.
+  `bootc switch` does not enforce that signature unless a policy says so.
+  Do not turn signature checking off on a machine you depend on unless you
+  accept that.
 - The console user `dj` starts from the published password `darkjuander`.
   It is not a secret, and first boot expires it. The first console login
   must set a new password. `sshd` is disabled and inbound connections are
@@ -53,7 +51,7 @@ Skip the `cat` line when the archive was not split. If
 cosign verify-blob \
   --bundle SHA256SUMS.cosign.bundle \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/Awkward8787/DARKJUANDER/.github/workflows/release.yml@' \
+  --certificate-identity-regexp '^https://github.com/Awkward8787/DARKJUANDER/.github/workflows/release.yml@refs/tags/v' \
   SHA256SUMS
 ```
 

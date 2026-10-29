@@ -31,6 +31,14 @@ def socket_ok(text: str) -> bool:
     return any(line.strip() == MARKER for line in text.splitlines())
 
 
+def password_expired(text: str) -> bool:
+    """True when the first login was forced to change dj's password."""
+    return (
+        "You are required to change your password immediately" in text
+        or "password must be changed" in text
+    )
+
+
 def multi_user_ok(text: str) -> bool:
     """True for the systemd banner or a guest-built marker line."""
     if "Reached target multi-user.target" in text or "Multi-User System" in text:
