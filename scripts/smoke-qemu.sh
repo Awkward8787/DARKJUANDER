@@ -105,7 +105,7 @@ import sys
 import time
 
 sys.path.insert(0, os.environ["SMOKE_LIB"])
-from smoke_marker import LoginDriver, socket_ok as marker_ok
+from smoke_marker import LoginDriver, multi_user_ok, socket_ok as marker_ok
 
 # systemd colors the console, so "Reached target multi-user.target" is not
 # contiguous bytes. Match the phrase after stripping those sequences.
@@ -179,7 +179,7 @@ try:
             log.flush()
             buf += chunk
             text = ANSI.sub("", buf.decode("utf-8", "replace"))
-            if "Reached target multi-user.target" in text or "Multi-User System" in text:
+            if multi_user_ok(text):
                 multi = True
             typed = login.on_text(text)
             if typed:
@@ -187,7 +187,7 @@ try:
                 proc.stdin.flush()
             if marker_ok(text):
                 socket_ok = True
-        if socket_ok:
+        if multi and socket_ok:
             break
 finally:
     proc.terminate()

@@ -7,11 +7,18 @@ typed command is therefore not evidence that umbrad is running.
 from __future__ import annotations
 
 MARKER = "UMBRAD_SOCKET_OK"
+MULTI_MARKER = "MULTI_USER_OK"
 
 
 def probe_command(sudo_password: str) -> str:
-    """Build the socket probe. The marker is assembled by the guest shell."""
+    """Ask the booted guest. quiet/rhgb hides the multi-user banner.
+
+    Each marker is assembled by the guest shell, so the echoed command
+    line is not itself a success line.
+    """
     return (
+        "systemctl is-active multi-user.target | grep -qx active"
+        " && printf '%s%s\\n' 'MULTI_' 'USER_OK'; "
         "echo "
         + sudo_password
         + " | sudo -S -p '' test -S /run/darkjuander/umbrad.sock"
@@ -20,11 +27,15 @@ def probe_command(sudo_password: str) -> str:
 
 
 def socket_ok(text: str) -> bool:
-    """True only when a transcript line is exactly the marker.
-
-    The echoed probe contains the two printf pieces, not this line.
-    """
+    """True only when a transcript line is exactly the socket marker."""
     return any(line.strip() == MARKER for line in text.splitlines())
+
+
+def multi_user_ok(text: str) -> bool:
+    """True for the systemd banner or a guest-built marker line."""
+    if "Reached target multi-user.target" in text or "Multi-User System" in text:
+        return True
+    return any(line.strip() == MULTI_MARKER for line in text.splitlines())
 
 
 class LoginDriver:
