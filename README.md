@@ -62,7 +62,7 @@ as a security boundary.
 
 `dj sandbox plan` prints a bubblewrap command that drops the network and capabilities. `dj sandbox run` refuses to start if `bwrap` is missing. When `bwrap` is present, the child applies Landlock and a seccomp denylist before `exec`.
 
-The image definition is [image/Containerfile](image/Containerfile). It targets Fedora bootc 45 for aarch64 and x86_64. CI builds that image with stub `umbrad`, `dj`, and `dj-auditd` binaries and checks that the Plymouth theme is in the initramfs. The GRUB artwork in `branding/grub/` is not installed. Nothing has been booted. See [docs/BASE.md](docs/BASE.md).
+The image definition is [image/Containerfile](image/Containerfile). It targets Fedora bootc 45 for aarch64 and x86_64. CI builds that image with stub `umbrad`, `dj`, and `dj-auditd` binaries. `image/check-initramfs.sh` then requires `usr/share/plymouth/themes/darkjuander/darkjuander.script` in the initramfs listing, `Theme=darkjuander` in the initramfs copy of `etc/plymouth/plymouthd.conf`, and `Plymouth.ttf` pointing at Inter. A name match on `darkjuander` is not that check. The GRUB artwork in `branding/grub/` is not installed. Nothing has been booted. See [docs/BASE.md](docs/BASE.md).
 
 ## What is planned
 

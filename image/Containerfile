@@ -55,10 +55,11 @@ COPY branding /tmp/darkjuander-branding
 COPY image/dracut/darkjuander-plymouth.conf /usr/lib/dracut/dracut.conf.d/darkjuander-plymouth.conf
 COPY image/bootc/10-darkjuander.toml /usr/lib/bootc/kargs.d/10-darkjuander.toml
 COPY image/backgrounds/darkjuander.xml /usr/share/gnome-background-properties/darkjuander.xml
-COPY image/fontconfig/60-darkjuander-inter.conf /usr/share/fontconfig/conf.avail/60-darkjuander-inter.conf
+COPY image/fontconfig/50-darkjuander-inter.conf /usr/share/fontconfig/conf.avail/50-darkjuander-inter.conf
 COPY image/apply-branding.sh /tmp/apply-branding.sh
+COPY image/check-initramfs.sh /usr/libexec/darkjuander/check-initramfs.sh
 
-RUN ln -sfn /usr/share/fontconfig/conf.avail/60-darkjuander-inter.conf /etc/fonts/conf.d/60-darkjuander-inter.conf \
+RUN ln -sfn /usr/share/fontconfig/conf.avail/50-darkjuander-inter.conf /etc/fonts/conf.d/50-darkjuander-inter.conf \
     && python3 /tmp/darkjuander-branding/scripts/build.py --only os \
     && mkdir -p /usr/share/plymouth/themes /usr/share/backgrounds /usr/share/icons /usr/share/fonts /usr/share/darkjuander \
     && cp -aL /tmp/darkjuander-branding/plymouth/darkjuander /usr/share/plymouth/themes/darkjuander \
@@ -73,8 +74,20 @@ RUN ln -sfn /usr/share/fontconfig/conf.avail/60-darkjuander-inter.conf /etc/font
     && fc-cache -f
 
 # Replace the base initramfs. bootc-image-builder does not rebuild it.
-# lsinitrd must show the theme, the label plugin, and Inter, or the build fails.
-RUN bash -c 'set -euo pipefail; kver=$(ls -1 /usr/lib/modules); test "$(printf "%s\n" "$kver" | wc -l)" -eq 1; initrd="/usr/lib/modules/${kver}/initramfs.img"; DRACUT_NO_XATTR=1 dracut --force "$initrd" "$kver"; lsinitrd "$initrd" > /tmp/lsinitrd.txt; grep -q darkjuander /tmp/lsinitrd.txt; grep -q label-freetype.so /tmp/lsinitrd.txt; grep -q Inter /tmp/lsinitrd.txt; rm -f /tmp/lsinitrd.txt'
+# check-initramfs.sh requires the theme script path, Theme=darkjuander inside
+# the initramfs plymouthd.conf, Plymouth.ttf pointing at Inter, and a size
+# at or under 140 MiB. A bare "darkjuander" match is not that check.
+# UseSimpledrm=1 is appended to plymouthd.defaults because the plymouth
+# dracut module reads that file, not /etc, when hostonly is off. simpledrm
+# is built into the Fedora kernel. UEFI firmware framebuffers (UTM) still
+# work. The full drm module was pulling in about 100 MB of nvidia firmware.
+# This choice has not been booted.
+RUN grep -q '^UseSimpledrm=' /usr/share/plymouth/plymouthd.defaults \
+    || printf '\nUseSimpledrm=1\n' >> /usr/share/plymouth/plymouthd.defaults \
+    && kver=$(ls -1 /usr/lib/modules) \
+    && test "$(printf '%s\n' "$kver" | wc -l)" -eq 1 \
+    && DRACUT_NO_XATTR=1 dracut --force "/usr/lib/modules/${kver}/initramfs.img" "${kver}" \
+    && bash /usr/libexec/darkjuander/check-initramfs.sh
 
 RUN dnf -y remove --setopt=clean_requirements_on_remove=True \
       python3-fonttools \

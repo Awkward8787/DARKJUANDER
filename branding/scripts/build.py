@@ -403,7 +403,7 @@ def wallpaper(dname, w, h):
     body.append(f'<g opacity="0.8">{frag}</g>')
     return svg(w, h, "\n".join(body), title="DARKJUANDER wallpaper")
 
-def build_os(dname):
+def build_os(dname, *, grub=True):
     out = ROOT / "wallpapers"
     for w, h in ((3840, 2160), (2560, 1600), (1920, 1080)):
         p = out / f"darkjuander-{w}x{h}.svg"
@@ -478,7 +478,15 @@ def build_os(dname):
         png(pl / f"{n_}.svg", pl / f"{n_}.png", w_, h_)
     png(pl / "lock.svg", pl / "lock.png", 40, 40)
 
-    # GRUB
+    # GRUB artwork. The image build passes grub=False: bootupd does not
+    # load a theme, and grub-mkfont is not part of that build.
+    if grub:
+        _build_grub(dname, c)
+
+    build_terminal()
+    (ROOT / "BUILD_DIRECTION").write_text(dname + "\n")
+
+def _build_grub(dname, c):
     gr = ROOT / "grub/darkjuander"
     gr.mkdir(parents=True, exist_ok=True)
     gw, gh = 1920, 1080
@@ -511,13 +519,12 @@ def build_os(dname):
     else:
         print("note: grub-mkfont not found; GRUB .pf2 fonts not generated (see grub/README.md)")
 
-    build_terminal()
-    (ROOT / "BUILD_DIRECTION").write_text(dname + "\n")
-
 TAGLINE = "Agents inside a boundary you can audit."
 
 def build_social():
     """GitHub social preview. SVG is the source; the PNG is the committed render."""
+    # Mask ids must not depend on how many icons were drawn before this call.
+    _uid[0] = 0
     W, H = 1280, 640
     c = VARIANTS["dark"]
     frag, lw, lh = lockup_horizontal("eclipse", c)
@@ -620,7 +627,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--direction", default="eclipse", choices=list(DIRECTIONS))
     ap.add_argument("--no-png", action="store_true")
-    ap.add_argument("--only", choices=("social", "os"), help="social: GitHub banner only. os: eclipse OS assets plus the banner.")
+    ap.add_argument("--only", choices=("social", "os"), help="social: GitHub banner only. os: eclipse Plymouth, wallpaper, and icon assets. Not the social card, not GRUB.")
     args = ap.parse_args()
     NO_PNG = args.no_png
     if args.only == "social":
@@ -633,8 +640,7 @@ if __name__ == "__main__":
         sys.exit(0)
     if args.only == "os":
         build_logos(only="eclipse")
-        build_os("eclipse")
-        build_social()
+        build_os("eclipse", grub=False)
         print("done. OS assets use direction: eclipse")
         sys.exit(0)
     build_logos()

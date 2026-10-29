@@ -32,7 +32,7 @@ Needs Python 3, `fonttools`, `Pillow`, and `rsvg-convert` (librsvg). `grub2-mkfo
 pip install fonttools pillow
 python3 scripts/build.py                       # all logo directions, OS assets, social preview
 python3 scripts/build.py --only social         # GitHub social SVG and PNG
-python3 scripts/build.py --only os             # eclipse OS assets and the social preview
+python3 scripts/build.py --only os             # eclipse Plymouth, wallpaper, and icon assets. Not the social card, not GRUB
 python3 scripts/build.py --direction lattice   # OS assets in another direction (eclipse, tag, lattice, route)
 python3 scripts/build.py --no-png              # SVG only, including the social SVG
 python3 scripts/contrast.py                    # rewrites research/contrast.md

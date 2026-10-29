@@ -133,7 +133,7 @@ LUKS prompt:
 Login screen:
 > Welcome back. Your agents are where you left them.
 
-(Planned. That sentence says the agents are already there. It is not installed. The image writes a neutral `/usr/lib/issue.d/50-darkjuander.issue` line instead.)
+(Planned. That sentence says the agents are already there. It is not installed. `/usr/lib/issue` already prints `PRETTY_NAME`, so the image does not add another DARKJUANDER line.)
 
 First terminal after login (motd):
 > DARKJUANDER  |  umbrad: running  |  audit: verified
@@ -237,7 +237,7 @@ All three families are free under the SIL Open Font License 1.1. License files a
 | UI | **Inter** | 400, 500, 600 | Desktop shell, dashboards, docs body, login |
 | Mono | **JetBrains Mono** | 400, 700 | Terminal default, code, log viewers, the mono line on cards |
 
-Space Grotesk is the display face because the outlined wordmark keeps its spurred D and barred J. Inter is the UI face because lumen_100 on umbra_950 stays readable at 14 px (see the contrast table). JetBrains Mono is the terminal and audit face so code and hashes do not look like the wordmark.
+Space Grotesk is the display face because the outlined wordmark keeps its spurred D and barred J. Inter is the UI face used at 14 px. The contrast table is about the colors, not a reason this face is the only readable one. JetBrains Mono is the terminal and audit face so code and hashes do not look like the wordmark.
 
 Wordmark: Space Grotesk Medium, all caps, tracking +150 (0.15 em). In the logo files the letters are outlined to paths, so the wordmark renders the same with or without the font installed. Do not retype the wordmark in a live font; use the SVG.
 
@@ -308,7 +308,7 @@ Below 40 px, switch to the `icon-small` files.
 
 ## 9. Imagery
 
-**Look:** near-black fields, one violet light source per image, and a 1 px grid. The grid is the trust-domain lattice, the same spacing a diagram uses when it shows agents in separate domains. It is not a texture. Light comes from the edge, the way it does around an eclipse. The eclipse mark itself has no glow. Diagrams and real screenshots beat illustration.
+**Look:** near-black fields, one violet light source per image, and a 1 px grid on the wallpapers and cards. The grid is a field mark. The architecture diagrams in `docs/diagrams/` do not use that spacing. Light comes from the edge, the way it does around an eclipse. The eclipse mark itself has no glow. Diagrams and real screenshots beat illustration.
 
 **Use:** real terminal output and real UI from the repo, architecture diagrams redrawn in the palette, close crops of hardware with low-key lighting, abstract eclipses and routes made from the brand shapes.
 
@@ -323,7 +323,7 @@ Below 40 px, switch to the `icon-small` files.
 | Surface | What it uses | File |
 |---|---|---|
 | **GRUB** | Artwork only. bootupd's static config does not load a theme, so the image does not install one. | `grub/darkjuander/`. See `grub/README.md` |
-| **Plymouth** | Centered icon, wordmark scaled with the icon, 240x4 violet progress bar, passphrase label from Plymouth's prompt text in Inter 14 | `plymouth/darkjuander/`. The image build runs dracut and CI checks the initramfs with `lsinitrd`. Not booted |
+| **Plymouth** | Centered icon, wordmark scaled with the icon, 240x4 violet progress bar. The script asks for Inter 14. label-freetype draws `Plymouth.ttf`, which the image points at Inter | `plymouth/darkjuander/`. CI checks the theme path and `Theme=darkjuander` inside the initramfs. Not booted |
 | **Login (GDM or greeter)** | Planned. No greeter is installed. The "Welcome back" line is not installed | wallpapers, palette |
 | **Wallpaper** | Large eclipse at right, route faint inside the disc, small wordmark at lower left | `wallpapers/darkjuander-{3840x2160,2560x1600,1920x1080}.{svg,png}` |
 | **Terminal** | Background umbra_950, text lumen_100, violet cursor, JetBrains Mono 12 to 14 | `terminal/` for Xresources, foot, kitty, Alacritty, GNOME Terminal |

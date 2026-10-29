@@ -109,8 +109,15 @@ if dest.stat().st_size == 0:
 print(f"instantiated {dest}")
 PY
 need "${font_dir}/Inter-Regular.ttf"
-need /usr/share/fontconfig/conf.avail/60-darkjuander-inter.conf
-need /etc/fonts/conf.d/60-darkjuander-inter.conf
+need /usr/share/fontconfig/conf.avail/50-darkjuander-inter.conf
+need /etc/fonts/conf.d/50-darkjuander-inter.conf
+if [[ -e /etc/fonts/conf.d/60-darkjuander-inter.conf ]]; then
+  die "fontconfig file 60-darkjuander-inter.conf sorts after Noto and must not be installed"
+fi
+fc-cache -f
+default_font=$(fc-match -f '%{file}\n')
+printf '%s\n' "${default_font}" | grep -q 'Inter' \
+  || die "fc-match default font is ${default_font}, not Inter"
 
 bg_dir=/usr/share/backgrounds/darkjuander
 for asset in \
@@ -234,20 +241,19 @@ if grep -q '^ID_LIKE=' "${os_release}"; then
   die "ID_LIKE must stay unset while ID=fedora"
 fi
 
-# The brand-guide login sentence claims the machine already has the user's
-# agents. That is planned, like the status motd, until it can read real state.
-# Do not replace /usr/lib/issue, which fedora-release-common owns.
-install -d -m 0755 /usr/lib/issue.d
-cat > /usr/lib/issue.d/50-darkjuander.issue <<'EOF'
-DARKJUANDER \S{VERSION_ID} (\l)
-
-EOF
-need /usr/lib/issue.d/50-darkjuander.issue
+# /usr/lib/issue already prints \S, which is PRETTY_NAME. A second
+# DARKJUANDER line in issue.d repeats the name before login. The planned
+# "Welcome back" sentence is not installed. Do not replace /usr/lib/issue.
+rm -f /usr/lib/issue.d/50-darkjuander.issue
+if [[ -d /usr/lib/issue.d ]]; then
+  while IFS= read -r issue_file; do
+    if grep -q 'DARKJUANDER' "${issue_file}"; then
+      die "issue.d repeats DARKJUANDER; /usr/lib/issue already prints PRETTY_NAME"
+    fi
+  done < <(find /usr/lib/issue.d -type f)
+fi
 if [[ -f /usr/lib/issue ]] && grep -q 'Welcome back. Your agents are where you left them.' /usr/lib/issue; then
   die "refusing to leave the planned login greeting in /usr/lib/issue"
-fi
-if grep -q 'Welcome back. Your agents are where you left them.' /usr/lib/issue.d/50-darkjuander.issue; then
-  die "refusing to install the planned login greeting"
 fi
 if [[ -f /etc/motd ]] && grep -q 'umbrad: running' /etc/motd; then
   die "refusing to leave a hard-coded motd; the brand guide marks that line planned"

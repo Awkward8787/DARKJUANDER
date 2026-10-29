@@ -17,7 +17,19 @@ grep -q 'plymouth-plugin-label' "${file}"
 grep -q 'generic-logos' "${file}"
 grep -q 'python3 /tmp/darkjuander-branding/scripts/build.py --only os' "${file}"
 grep -q 'dracut --force' "${file}"
-grep -q 'lsinitrd' "${file}"
+grep -q 'check-initramfs.sh' "${file}"
+grep -q 'UseSimpledrm=1' "${file}"
+grep -q '50-darkjuander-inter.conf' "${file}"
+initramfs=${root}/image/check-initramfs.sh
+grep -q 'usr/share/plymouth/themes/darkjuander/darkjuander.script' "${initramfs}"
+grep -q 'lsinitrd -f etc/plymouth/plymouthd.conf' "${initramfs}"
+grep -q 'Theme=darkjuander' "${initramfs}"
+grep -q 'Plymouth.ttf -> .*Inter' "${initramfs}"
+grep -q '140 \* 1024 \* 1024' "${initramfs}"
+if grep -q '60-darkjuander-inter.conf' "${file}"; then
+  echo "fontconfig conf must sort before Noto (50- or 55-, not 60-)." >&2
+  exit 1
+fi
 grep -q '10-darkjuander.toml' "${file}"
 grep -q 'bash /tmp/apply-branding.sh' "${file}"
 grep -q 'LicenseRef-DARKJUANDER-Brand' "${file}"
@@ -44,7 +56,7 @@ grep -q 'LOGO=darkjuander' "${brand}"
 grep -q 'HOME_URL="https://github.com/Awkward8787/DARKJUANDER"' "${brand}"
 grep -q 'ID=fedora' "${brand}"
 grep -q 'generic-logos' "${brand}"
-grep -q '/usr/lib/issue.d/50-darkjuander.issue' "${brand}"
+grep -q 'issue.d repeats DARKJUANDER' "${brand}"
 if grep -q 'grub2-mkfont' "${brand}"; then
   echo "apply-branding.sh must not build a GRUB theme." >&2
   exit 1
