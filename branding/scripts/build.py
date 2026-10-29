@@ -13,7 +13,7 @@ depends on installed fonts.
 Directions: eclipse (recommended), tag, lattice, route.
 Needs: python3, fontTools, Pillow, rsvg-convert. Optional: grub-mkfont / grub2-mkfont.
 """
-import argparse, json, math, pathlib, shutil, subprocess, sys
+import argparse, json, math, os, pathlib, shutil, subprocess, sys
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
 from fontTools.pens.svgPathPen import SVGPathPen
@@ -286,6 +286,13 @@ def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
+def relink(dst, src):
+    """Point dst at src so the tree does not store a second copy of the same bytes."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.is_symlink() or dst.exists():
+        dst.unlink()
+    dst.symlink_to(os.path.relpath(src, dst.parent))
+
 def png(src, dst, w=None, h=None, bg=None):
     if NO_PNG:
         return
@@ -298,8 +305,9 @@ def png(src, dst, w=None, h=None, bg=None):
 
 ICON_SIZES = [16, 32, 64, 128, 256, 512, 1024]
 
-def build_logos():
-    for dname in DIRECTIONS:
+def build_logos(only=None):
+    names = [only] if only else list(DIRECTIONS)
+    for dname in names:
         base = ROOT / "logo" / dname
         for v, c in VARIANTS.items():
             write(base / "svg" / f"{dname}-icon-{v}.svg", svg(512, 512, place_icon(dname, c, 0, 0, 512)))
@@ -376,11 +384,9 @@ def wallpaper(dname, w, h):
         gap = h * 0.008
         body.insert(0, f'<defs><mask id="{m}c" maskUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{h}">'
                        f'<rect width="{w}" height="{h}" fill="#fff"/><circle cx="{ox}" cy="{oy}" r="{R + gap}" fill="#000"/></mask>'
-                       f'<filter id="{m}b" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="{h * 0.03:.1f}"/></filter>'
                        f'<radialGradient id="{m}g" cx="{lx / w:.3f}" cy="{ly / h:.3f}" r="0.6"><stop offset="0" stop-color="{B["violet"]}" stop-opacity="0.10"/>'
                        f'<stop offset="1" stop-color="{B["violet"]}" stop-opacity="0"/></radialGradient></defs>')
         body += [f'<rect width="{w}" height="{h}" fill="url(#{m}g)"/>',
-                 f'<circle cx="{lx}" cy="{ly}" r="{R}" fill="{B["violet"]}" opacity="0.55" mask="url(#{m}c)" filter="url(#{m}b)"/>',
                  f'<circle cx="{lx}" cy="{ly}" r="{R}" fill="{B["violet"]}" mask="url(#{m}c)"/>',
                  f'<circle cx="{ox}" cy="{oy}" r="{R}" fill="{N["umbra_900"]}"/>']
         k = R / 178
@@ -412,9 +418,8 @@ def build_os(dname):
     frag, lw, lh = lockup_horizontal(dname, c)
     s = 64 / lh if DIRECTIONS[dname]["kind"] != "pure wordmark" else 34 / lh
     body.append(f'<g transform="translate(72,72) scale({s:.4f})">{frag}</g>')
-    y = 300
-    for line in ("Run AI agents inside", "a boundary you can audit."):
-        t, _ = label(line, 72, y, 54, N["lumen_100"], SG500); body.append(t); y += 68
+    tagline = "Agents inside a boundary you can audit."
+    t, _ = label(tagline, 72, 360, 42, N["lumen_100"], SG500); body.append(t)
     t, _ = label("Linux workstation OS  /  Fedora bootc base  /  UMBRA core", 72, 520, 20, N["ash_400"], MONO); body.append(t)
     t, _ = label("github.com/Awkward8787/DARKJUANDER", 72, 556, 20, B["violet"], MONO); body.append(t)
     p = ROOT / "web/og-card-1200x630.svg"
@@ -440,16 +445,27 @@ def build_os(dname):
         png(ROOT / "web/app-icon.svg", ROOT / "web/icon-512.png", 512, 512)
         # OS icon theme sizes (hicolor)
         for s in (16, 24, 32, 48, 64, 128, 256, 512):
-            src = ROOT / f"logo/{dname}/svg/{dname}-icon-{'small-' if s <= 32 else ''}dark.svg"
-            png(src, ROOT / f"os-icon/hicolor/{s}x{s}/apps/darkjuander.png", s, s)
-        (ROOT / "os-icon/hicolor/scalable/apps").mkdir(parents=True, exist_ok=True)
-        shutil.copy(ROOT / f"logo/{dname}/svg/{dname}-icon-dark.svg", ROOT / "os-icon/hicolor/scalable/apps/darkjuander.svg")
+            dest = ROOT / f"os-icon/hicolor/{s}x{s}/apps/darkjuander.png"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            icon_png = ROOT / f"logo/{dname}/png/icon/{dname}-icon-{s}-transparent.png"
+            if icon_png.exists():
+                relink(dest, icon_png)
+            else:
+                src = ROOT / f"logo/{dname}/svg/{dname}-icon-{'small-' if s <= 32 else ''}dark.svg"
+                png(src, dest, s, s)
+        scalable = ROOT / "os-icon/hicolor/scalable/apps/darkjuander.svg"
+        scalable.parent.mkdir(parents=True, exist_ok=True)
+        relink(scalable, ROOT / f"logo/{dname}/svg/{dname}-icon-dark.svg")
 
     # Plymouth
     pl = ROOT / "plymouth/darkjuander"
     pl.mkdir(parents=True, exist_ok=True)
     write(pl / "logo.svg", svg(512, 512, place_icon(dname, c, 0, 0, 512)))
-    png(pl / "logo.svg", pl / "logo.png", 256, 256)
+    icon256 = ROOT / f"logo/{dname}/png/icon/{dname}-icon-256-transparent.png"
+    if not NO_PNG and icon256.exists():
+        relink(pl / "logo.png", icon256)
+    else:
+        png(pl / "logo.svg", pl / "logo.png", 256, 256)
     frag, ww = wordmark(dname, c, 40)
     write(pl / "wordmark.svg", svg(ww, 40, frag.replace('d="', 'transform="translate(0,40)" d="', 1) if False else f'<g transform="translate(0,40)">{frag}</g>'))
     png(pl / "wordmark.svg", pl / "wordmark.png", None, 22)
@@ -473,13 +489,17 @@ def build_os(dname):
     write(gr / "background.svg", svg(gw, gh, "\n".join(gb), title="DARKJUANDER GRUB background"))
     png(gr / "background.svg", gr / "background.png", gw, gh)
     for nm, fill, stroke in (("select", N["umbra_800"], B["violet"]),):
-        for part, body in {
+        parts = {
             "c": f'<rect width="8" height="44" fill="{fill}"/>',
             "w": f'<rect width="8" height="44" fill="{fill}"/><rect width="3" height="44" fill="{stroke}"/>',
-            "e": f'<rect width="8" height="44" fill="{fill}"/>',
-        }.items():
+        }
+        for part, body in parts.items():
             write(gr / f"{nm}_{part}.svg", svg(8, 44, body))
             png(gr / f"{nm}_{part}.svg", gr / f"{nm}_{part}.png", 8, 44)
+        # select_e is the same art as select_c. Keep one file.
+        relink(gr / f"{nm}_e.svg", gr / f"{nm}_c.svg")
+        if not NO_PNG:
+            relink(gr / f"{nm}_e.png", gr / f"{nm}_c.png")
     for part, body in {"c": f'<rect width="6" height="6" fill="{N["umbra_700"]}"/>'}.items():
         write(gr / f"slider_{part}.svg", svg(6, 6, body)); png(gr / f"slider_{part}.svg", gr / f"slider_{part}.png", 6, 6)
     for part, body in {"c": f'<rect width="6" height="6" fill="{B["violet"]}"/>'}.items():
@@ -493,6 +513,35 @@ def build_os(dname):
 
     build_terminal()
     (ROOT / "BUILD_DIRECTION").write_text(dname + "\n")
+
+TAGLINE = "Agents inside a boundary you can audit."
+
+def build_social():
+    """GitHub social preview. SVG is the source; the PNG is the committed render."""
+    W, H = 1280, 640
+    c = VARIANTS["dark"]
+    frag, lw, lh = lockup_horizontal("eclipse", c)
+    target_w = 920
+    scale = target_w / lw
+    logo_h = lh * scale
+    size = 40
+    tw = SG500.measure(TAGLINE, size)
+    gap = 44
+    block_h = logo_h + gap + size
+    top = (H - block_h) / 2
+    lx = (W - target_w) / 2
+    body = [
+        f'<rect width="{W}" height="{H}" fill="{N["umbra_950"]}"/>',
+        grid(W, H, 40, N["umbra_800"], 0.45),
+        f'<g transform="translate({lx:.2f},{top:.2f}) scale({scale:.5f})">{frag}</g>',
+    ]
+    baseline = top + logo_h + gap + size
+    text, _ = label(TAGLINE, (W - tw) / 2, baseline, size, N["lumen_100"], SG500)
+    body.append(text)
+    svg_path = ROOT / "social/darkjuander-social-1280x640.svg"
+    png_path = ROOT / "social/darkjuander-social-1280x640.png"
+    write(svg_path, svg(W, H, "\n".join(body), title="DARKJUANDER"))
+    png(svg_path, png_path, W, H)
 
 def build_terminal():
     t = PAL["terminal"]
@@ -571,12 +620,26 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--direction", default="eclipse", choices=list(DIRECTIONS))
     ap.add_argument("--no-png", action="store_true")
+    ap.add_argument("--only", choices=("social", "os"), help="social: GitHub banner only. os: eclipse OS assets plus the banner.")
     args = ap.parse_args()
     NO_PNG = args.no_png
+    if args.only == "social":
+        NO_PNG = False
     if not NO_PNG and not shutil.which("rsvg-convert"):
         sys.exit("rsvg-convert is required for PNG export (or pass --no-png)")
+    if args.only == "social":
+        build_social()
+        print("done. social preview")
+        sys.exit(0)
+    if args.only == "os":
+        build_logos(only="eclipse")
+        build_os("eclipse")
+        build_social()
+        print("done. OS assets use direction: eclipse")
+        sys.exit(0)
     build_logos()
     build_comparison()
     build_swatches()
     build_os(args.direction)
+    build_social()
     print(f"done. OS assets use direction: {args.direction}")

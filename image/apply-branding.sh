@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Apply DARKJUANDER branding during the bootc image build.
-# Nothing here has been booted. A missing asset is a build error.
+# CI runs this inside the image build. Nothing here has been booted.
 set -euo pipefail
 
 die() {
@@ -15,19 +15,12 @@ need() {
   fi
 }
 
+[[ -e /usr/lib64/plymouth/script.so || -e /usr/lib/plymouth/script.so ]] \
+  || die "plymouth script module is missing (package plymouth-plugin-script)"
+[[ -e /usr/lib64/plymouth/label-freetype.so || -e /usr/lib/plymouth/label-freetype.so ]] \
+  || die "plymouth label module is missing (package plymouth-plugin-label)"
 command -v plymouth-set-default-theme >/dev/null 2>&1 \
-  || die "plymouth-set-default-theme is not installed (package plymouth)"
-command -v grub2-mkfont >/dev/null 2>&1 \
-  || die "grub2-mkfont is not installed (package grub2-tools-extra)"
-command -v python3 >/dev/null 2>&1 \
-  || die "python3 is not installed (needed to instantiate OFL fonts for grub2-mkfont)"
-
-shopt -s nullglob
-plymouth_plugins=(/usr/lib64/plymouth/script.so /usr/lib/plymouth/script.so)
-shopt -u nullglob
-if ((${#plymouth_plugins[@]} == 0)); then
-  die "plymouth script module is missing (package plymouth-scripts)"
-fi
+  || die "plymouth-set-default-theme is not installed (package plymouth-scripts)"
 
 theme_dir=/usr/share/plymouth/themes/darkjuander
 for asset in \
@@ -43,6 +36,10 @@ for asset in \
 do
   need "${theme_dir}/${asset}"
 done
+grep -q 'Image.Text(prompt_text' "${theme_dir}/darkjuander.script" \
+  || die "plymouth script does not draw prompt_text"
+grep -q 'Inter 14' "${theme_dir}/darkjuander.script" \
+  || die "plymouth script does not use Inter 14"
 
 plymouth-set-default-theme darkjuander
 
@@ -73,6 +70,13 @@ fi
 need /usr/lib/dracut/dracut.conf.d/darkjuander-plymouth.conf
 grep -q 'add_dracutmodules+=" plymouth "' /usr/lib/dracut/dracut.conf.d/darkjuander-plymouth.conf \
   || die "dracut config does not add the plymouth module"
+grep -q 'Inter.ttf' /usr/lib/dracut/dracut.conf.d/darkjuander-plymouth.conf \
+  || die "dracut config does not install Inter"
+
+kargs=/usr/lib/bootc/kargs.d/10-darkjuander.toml
+need "${kargs}"
+grep -q 'rhgb' "${kargs}" || die "${kargs} does not set rhgb"
+grep -q 'quiet' "${kargs}" || die "${kargs} does not set quiet"
 
 font_dir=/usr/share/fonts/darkjuander
 for asset in \
@@ -85,10 +89,9 @@ for asset in \
 do
   need "${font_dir}/${asset}"
 done
-
-instance_dir=/tmp/darkjuander-font-instances
-rm -rf "${instance_dir}"
-python3 - "${font_dir}" "${instance_dir}" <<'PY'
+command -v python3 >/dev/null 2>&1 \
+  || die "python3 is not installed (needed to instantiate Inter for Plymouth)"
+python3 - "${font_dir}" <<'PY'
 import sys
 from pathlib import Path
 
@@ -96,69 +99,27 @@ from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
 
 src = Path(sys.argv[1])
-out = Path(sys.argv[2])
-out.mkdir(parents=True, exist_ok=True)
-
-def make(src_name, dest_name, **axes):
-    src_path = src / src_name
-    if not src_path.is_file() or src_path.stat().st_size == 0:
-        sys.exit(f"error: font missing or empty: {src_path}")
-    dest = out / dest_name
-    instancer.instantiateVariableFont(TTFont(src_path), axes).save(str(dest))
-    if dest.stat().st_size == 0:
-        sys.exit(f"error: font instance is empty: {dest}")
-    print(f"instantiated {dest}")
-
-make("Inter.ttf", "Inter-opsz14-wght400.ttf", wght=400, opsz=14)
-make("JetBrainsMono.ttf", "JetBrainsMono-wght400.ttf", wght=400)
+inter = src / "Inter.ttf"
+if not inter.is_file() or inter.stat().st_size == 0:
+    sys.exit(f"error: font missing or empty: {inter}")
+dest = src / "Inter-Regular.ttf"
+instancer.instantiateVariableFont(TTFont(inter), {"wght": 400, "opsz": 14}).save(str(dest))
+if dest.stat().st_size == 0:
+    sys.exit(f"error: font instance is empty: {dest}")
+print(f"instantiated {dest}")
 PY
-
-grub_dir=/usr/share/grub/themes/darkjuander
-need "${grub_dir}/theme.txt"
-need "${grub_dir}/background.png"
-grep -q 'Inter Regular 18' "${grub_dir}/theme.txt" \
-  || die "GRUB theme.txt does not name Inter Regular 18"
-grep -q 'JetBrains Mono Regular 16' "${grub_dir}/theme.txt" \
-  || die "GRUB theme.txt does not name JetBrains Mono Regular 16"
-
-# Do not pass -n. grub2-mkfont appends the style itself, and these
-# instances already produce "Inter Regular 18" and "JetBrains Mono Regular 16",
-# which are the names in theme.txt. No boot has confirmed GRUB loads them.
-grub2-mkfont -s 18 \
-  -o "${grub_dir}/inter_regular_18.pf2" \
-  "${instance_dir}/Inter-opsz14-wght400.ttf"
-grub2-mkfont -s 16 \
-  -o "${grub_dir}/jetbrains_mono_16.pf2" \
-  "${instance_dir}/JetBrainsMono-wght400.ttf"
-rm -rf "${instance_dir}"
-
-need "${grub_dir}/inter_regular_18.pf2"
-need "${grub_dir}/jetbrains_mono_16.pf2"
-grep -a -q 'Inter Regular 18' "${grub_dir}/inter_regular_18.pf2" \
-  || die "inter_regular_18.pf2 does not contain the theme font name Inter Regular 18"
-grep -a -q 'JetBrains Mono Regular 16' "${grub_dir}/jetbrains_mono_16.pf2" \
-  || die "jetbrains_mono_16.pf2 does not contain the theme font name JetBrains Mono Regular 16"
-
-grub_default=/etc/default/grub
-[[ -f "${grub_default}" ]] \
-  || die "base image has no ${grub_default}; refusing to invent a bootloader config"
-grub_theme="${grub_dir}/theme.txt"
-grub_line="GRUB_THEME=\"${grub_theme}\""
-if grep -q '^GRUB_THEME=' "${grub_default}"; then
-  tmp=$(mktemp)
-  sed "s|^GRUB_THEME=.*|${grub_line}|" "${grub_default}" > "${tmp}"
-  cat "${tmp}" > "${grub_default}"
-  rm -f "${tmp}"
-else
-  printf '\n%s\n' "${grub_line}" >> "${grub_default}"
-fi
-grep -q '^GRUB_THEME="/usr/share/grub/themes/darkjuander/theme.txt"$' "${grub_default}" \
-  || die "failed to set GRUB_THEME in ${grub_default}"
+need "${font_dir}/Inter-Regular.ttf"
+need /usr/share/fontconfig/conf.avail/60-darkjuander-inter.conf
+need /etc/fonts/conf.d/60-darkjuander-inter.conf
 
 bg_dir=/usr/share/backgrounds/darkjuander
-need "${bg_dir}/darkjuander-3840x2160.png"
-need "${bg_dir}/darkjuander-2560x1600.png"
-need "${bg_dir}/darkjuander-1920x1080.png"
+for asset in \
+  darkjuander-3840x2160.png \
+  darkjuander-2560x1600.png \
+  darkjuander-1920x1080.png
+do
+  need "${bg_dir}/${asset}"
+done
 ln -sfn darkjuander-3840x2160.png "${bg_dir}/default.png"
 ln -sfn darkjuander/default.png /usr/share/backgrounds/default.png
 [[ -s /usr/share/backgrounds/default.png ]] \
@@ -169,9 +130,18 @@ grep -q '/usr/share/backgrounds/darkjuander/darkjuander-3840x2160.png' \
   || die "background metadata does not point at the installed wallpaper"
 
 need /usr/share/icons/hicolor/scalable/apps/darkjuander.svg
-need /usr/share/icons/hicolor/16x16/apps/darkjuander.png
-need /usr/share/icons/hicolor/48x48/apps/darkjuander.png
-need /usr/share/icons/hicolor/256x256/apps/darkjuander.png
+for size in 16 24 32 48 64 128 256 512; do
+  need "/usr/share/icons/hicolor/${size}x${size}/apps/darkjuander.png"
+done
+install -D -m 0644 /usr/share/icons/hicolor/256x256/apps/darkjuander.png \
+  /usr/share/pixmaps/darkjuander.png
+need /usr/share/pixmaps/darkjuander.png
+
+rpm -q generic-logos >/dev/null \
+  || die "generic-logos is not installed; the image must swap out fedora-logos"
+if rpm -q fedora-logos >/dev/null 2>&1; then
+  die "fedora-logos is still installed"
+fi
 
 term_dir=/usr/share/darkjuander/terminal
 for asset in \
@@ -192,13 +162,31 @@ import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
+repo = "https://github.com/Awkward8787/DARKJUANDER"
 wanted = {
     "NAME": '"DARKJUANDER"',
     "PRETTY_NAME": '"DARKJUANDER"',
     "LOGO": "darkjuander",
-    "HOME_URL": '"https://github.com/Awkward8787/DARKJUANDER"',
-    "ID_LIKE": "fedora",
+    "HOME_URL": f'"{repo}"',
+    "SUPPORT_URL": f'"{repo}"',
+    "BUG_REPORT_URL": f'"{repo}"',
+    "ANSI_COLOR": '"0;38;2;157;140;255"',
+    "DEFAULT_HOSTNAME": "darkjuander",
 }
+preserved = ("ID", "VERSION_ID", "VARIANT_ID", "ID_LIKE")
+
+def parse(text):
+    got = {}
+    for line in text.splitlines():
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        got[key] = value
+    return got
+
+before = parse(path.read_text())
+if "ID" not in before:
+    sys.exit(f"error: {path} has no ID=")
 lines = path.read_text().splitlines()
 seen = set()
 out = []
@@ -217,18 +205,14 @@ for key, value in wanted.items():
         out.append(f"{key}={value}")
 text = "\n".join(out) + "\n"
 path.write_text(text)
-got = {}
-for line in text.splitlines():
-    if not line or line.startswith("#") or "=" not in line:
-        continue
-    key, value = line.split("=", 1)
-    got[key] = value
+after = parse(text)
 for key, value in wanted.items():
-    if got.get(key) != value:
-        sys.exit(f"error: {path} has {key}={got.get(key)!r}, expected {value}")
-if "ID=" not in got:
-    sys.exit(f"error: {path} lost ID=")
-print("os-release updated: NAME, PRETTY_NAME, LOGO, HOME_URL, ID_LIKE=fedora")
+    if after.get(key) != value:
+        sys.exit(f"error: {path} has {key}={after.get(key)!r}, expected {value}")
+for key in preserved:
+    if before.get(key) != after.get(key):
+        sys.exit(f"error: {path} changed {key} from {before.get(key)!r} to {after.get(key)!r}")
+print(f"os-release updated. ID stayed {after['ID']}")
 PY
 
 if [[ -L /etc/os-release ]]; then
@@ -245,22 +229,28 @@ grep -q '^PRETTY_NAME="DARKJUANDER"$' "${os_release}" || die "PRETTY_NAME was no
 grep -q '^LOGO=darkjuander$' "${os_release}" || die "LOGO was not written"
 grep -q '^HOME_URL="https://github.com/Awkward8787/DARKJUANDER"$' "${os_release}" \
   || die "HOME_URL was not written"
-grep -q '^ID_LIKE=fedora$' "${os_release}" || die "ID_LIKE=fedora was not written"
+grep -q '^ID=fedora$' "${os_release}" || die "ID=fedora was not kept"
+if grep -q '^ID_LIKE=' "${os_release}"; then
+  die "ID_LIKE must stay unset while ID=fedora"
+fi
 
-# Login greeting from the brand guide. The status motd is marked planned
-# there and is not installed.
-cat > /etc/issue <<'EOF'
-DARKJUANDER
-Welcome back. Your agents are where you left them.
+# The brand-guide login sentence claims the machine already has the user's
+# agents. That is planned, like the status motd, until it can read real state.
+# Do not replace /usr/lib/issue, which fedora-release-common owns.
+install -d -m 0755 /usr/lib/issue.d
+cat > /usr/lib/issue.d/50-darkjuander.issue <<'EOF'
+DARKJUANDER \S{VERSION_ID} (\l)
 
 EOF
-grep -q 'Welcome back. Your agents are where you left them.' /etc/issue \
-  || die "failed to write /etc/issue"
+need /usr/lib/issue.d/50-darkjuander.issue
+if [[ -f /usr/lib/issue ]] && grep -q 'Welcome back. Your agents are where you left them.' /usr/lib/issue; then
+  die "refusing to leave the planned login greeting in /usr/lib/issue"
+fi
+if grep -q 'Welcome back. Your agents are where you left them.' /usr/lib/issue.d/50-darkjuander.issue; then
+  die "refusing to install the planned login greeting"
+fi
 if [[ -f /etc/motd ]] && grep -q 'umbrad: running' /etc/motd; then
   die "refusing to leave a hard-coded motd; the brand guide marks that line planned"
 fi
 
-dnf -y remove --setopt=clean_requirements_on_remove=False python3-fonttools
-dnf -y clean all
-
-echo "DARKJUANDER branding files are in the image. Plymouth, GRUB, wallpaper, icons, terminal colors, os-release, and /etc/issue are set. This has not been booted."
+echo "DARKJUANDER branding files are in the image. Plymouth is the default theme. GRUB art is not installed. This has not been booted."

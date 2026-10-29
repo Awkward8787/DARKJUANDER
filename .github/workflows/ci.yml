@@ -45,6 +45,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: palette, assets, and brand build
         run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin
           python3 -m venv /tmp/brand-venv
           /tmp/brand-venv/bin/pip install fonttools pillow
           PATH="/tmp/brand-venv/bin:${PATH}" ./scripts/check-branding.sh --no-png
+          PATH="/tmp/brand-venv/bin:${PATH}" ./scripts/check-branding.sh --check-social
+
+  image-branding:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: podman build and initramfs check
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+          mkdir -p out/stage
+          printf '#!/bin/sh\necho stub\n' > out/stage/umbrad
+          cp out/stage/umbrad out/stage/dj
+          cp out/stage/umbrad out/stage/dj-auditd
+          chmod 0755 out/stage/umbrad out/stage/dj out/stage/dj-auditd
+          sudo podman build --network=host -f image/Containerfile -t localhost/dj-base:branding-ci .

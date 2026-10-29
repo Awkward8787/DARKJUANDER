@@ -1,0 +1,23 @@
+name: Brand permission
+description: Ask to use the DARKJUANDER name, logo, or other brand assets
+title: "Brand permission: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Brand assets are proprietary to Anthony Jaamal Jones and Vibe Virtue Enterprise LLC. See branding/LICENSE-BRAND.md. This is not a trademark registration.
+  - type: textarea
+    id: use
+    attributes:
+      label: What you want to use, and where
+      description: Name the files and the place they would appear.
+    validations:
+      required: true
+  - type: textarea
+    id: contact
+    attributes:
+      label: How to reply
+      description: An email or a GitHub username where the owner can answer.
+    validations:
+      required: true

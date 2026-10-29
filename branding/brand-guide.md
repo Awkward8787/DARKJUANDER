@@ -18,7 +18,7 @@ DARKJUANDER is still a working name. A first search found no conflicting softwar
 
 **What it replaces:** hand-built containers, scattered logs, and hoping the agent with shell access behaves.
 
-**How it is different:** the other security distros ship tools or compartments. DARKJUANDER ships a boundary for AI agents: labels on every model call, a sandbox per agent, and one audit log for all of it.
+**How it is different:** the other security distros ship tools or compartments (see `research/competitors.md`). DARKJUANDER ships a boundary for AI agents: labels on every model call, a sandbox per agent, and one audit log for all of it.
 
 ### Three proof points
 
@@ -26,7 +26,7 @@ Each one points at code or tests in the repository. Anything not built yet is ma
 
 1. **Private data stays on the machine.** Every model call through UMBRA carries a data label. In demo scene 5, an agent resubmits bytes from a private file with a public label. The session stays private, and the hard rule keeps the call on the local model. The cloud engine's call count stays at 0. (`cargo test`, scene 5, mock engine.)
 2. **One audit log you can check.** Model calls, tool calls, and broker decisions go into a hash-chained log with a signed checkpoint. `dj audit verify` catches truncation and swapped fields. (Shipped in the userspace. Log encryption is **planned**.)
-3. **Agents do not share what they should not.** Agents in different trust domains get separate prefix caches, and a cache miss does not reveal whose cache it was (scene 2). `dj sandbox run` starts each agent under bubblewrap with Landlock and a seccomp filter, no network, and no capabilities. (Shipped. The seccomp profile is a denylist today; an allowlist is **planned**.)
+3. **Agents do not share what they should not.** A second agent with the same prefix gets a miss and no trace of the first agent's domain in its response (scene 2, mock engine; timing not measured). `dj sandbox run` starts each agent under bubblewrap with Landlock and a seccomp filter, no network, and no capabilities. (Shipped. The seccomp profile is a denylist today; an allowlist is **planned**.)
 
 **Planned, not shipped. Never describe these as available:** a bootable disk image, signed images and A/B updates, a desktop shell and trusted approval dialog, real cloud provider clients (Grok, ChatGPT), and the Section 7.9 performance targets.
 
@@ -108,7 +108,7 @@ Dark palette, short sentences, no hype. We let the boundary do the talking.
 >
 > DARKJUANDER is a Linux workstation built on Fedora bootc for people who run AI agents every day. Each agent gets its own sandbox. Every model call carries a label that decides where it may run. Everything lands in one log you can verify.
 >
-> Early and honest: the userspace and demos run today. The bootable image is next.
+> The userspace and demos run today. The bootable image is next.
 >
 > [Read the code] [See what works today]
 
@@ -133,6 +133,8 @@ LUKS prompt:
 Login screen:
 > Welcome back. Your agents are where you left them.
 
+(Planned. That sentence says the agents are already there. It is not installed. The image writes a neutral `/usr/lib/issue.d/50-darkjuander.issue` line instead.)
+
 First terminal after login (motd):
 > DARKJUANDER  |  umbrad: running  |  audit: verified
 
@@ -146,18 +148,22 @@ First terminal after login (motd):
 
 ### X / Reddit post
 
+Template for Jaamal to fill in. This is not his post, and it does not speak for him.
+
 X:
 > I'm building DARKJUANDER, a Linux workstation for running AI agents inside a boundary you can audit.
 >
-> Each agent gets a sandbox. Every model call gets a label. Private data stays on the local model, and it's all in one verifiable log.
+> [What you run today, in your own words.]
 >
-> Early, open about limits, Fedora bootc under the hood.
+> Each agent gets a sandbox. Every model call gets a label. Private data is kept off cloud models by a hard rule (tested on a mock engine), and the calls land in one verifiable log.
+>
+> The userspace and demos run today. No disk image has been booted yet.
 > github.com/Awkward8787/DARKJUANDER
 
-Reddit (r/linux, r/selfhosted, r/LocalLLaMA title and first lines):
-> **Title:** I'm building a Fedora bootc workstation that sandboxes AI agents and logs every model call
+Reddit (r/linux, r/selfhosted, r/LocalLLaMA):
+> **Title:** [One factual sentence about the sandbox and the log.]
 >
-> I run a lot of coding agents with shell access and got tired of hand-built containers and logs in five places. DARKJUANDER puts each agent in a bubblewrap + Landlock sandbox, labels every model call so private data can't be routed to a cloud model, and writes everything to a hash-chained audit log. It's early: the userspace and demos work on a mock engine, there's no disk image yet. Feedback on the threat model is the thing I want most.
+> [Your first paragraph, in your own words. Do not say private data cannot leave the machine. The tested behavior is a hard rule that keeps a labeled call on the local model in the mock-engine demo. Say that the userspace runs and that no disk image has been booted.]
 
 ---
 
@@ -231,6 +237,8 @@ All three families are free under the SIL Open Font License 1.1. License files a
 | UI | **Inter** | 400, 500, 600 | Desktop shell, dashboards, docs body, login |
 | Mono | **JetBrains Mono** | 400, 700 | Terminal default, code, log viewers, the mono line on cards |
 
+Space Grotesk is the display face because the outlined wordmark keeps its spurred D and barred J. Inter is the UI face because lumen_100 on umbra_950 stays readable at 14 px (see the contrast table). JetBrains Mono is the terminal and audit face so code and hashes do not look like the wordmark.
+
 Wordmark: Space Grotesk Medium, all caps, tracking +150 (0.15 em). In the logo files the letters are outlined to paths, so the wordmark renders the same with or without the font installed. Do not retype the wordmark in a live font; use the SVG.
 
 Type scale for UI (Inter): 12 / 14 / 16 / 20 / 24 / 32. Headlines (Space Grotesk): 40 / 54 / 72.
@@ -249,7 +257,7 @@ Why this one:
 - Violet is clear of Kali's blue, Parrot's cyan, and BlackArch's red, and it never collides with status colors.
 - A simplified small variant (disc, crescent, end node only) stays readable at 16 px.
 
-The other three directions (Label Tag, Lattice Gate, Route Monogram) are in `logo/` as full masters in case the owner prefers one. `logo/logo-directions.png` compares all four on dark and light.
+The other three directions (Label Tag, Lattice Gate, Route Monogram) are in `logo/` as SVG masters in case the owner prefers one. `python3 scripts/build.py` writes `logo/logo-directions.png`, which compares all four. That PNG is not committed.
 
 ### Files
 
@@ -300,7 +308,7 @@ Below 40 px, switch to the `icon-small` files.
 
 ## 9. Imagery
 
-**Look:** near-black fields, a faint 1-pixel grid, one violet light source per image. Light comes from the edge, the way it does around an eclipse. Diagrams and real screenshots beat illustration.
+**Look:** near-black fields, one violet light source per image, and a 1 px grid. The grid is the trust-domain lattice, the same spacing a diagram uses when it shows agents in separate domains. It is not a texture. Light comes from the edge, the way it does around an eclipse. The eclipse mark itself has no glow. Diagrams and real screenshots beat illustration.
 
 **Use:** real terminal output and real UI from the repo, architecture diagrams redrawn in the palette, close crops of hardware with low-key lighting, abstract eclipses and routes made from the brand shapes.
 
@@ -314,9 +322,9 @@ Below 40 px, switch to the `icon-small` files.
 
 | Surface | What it uses | File |
 |---|---|---|
-| **GRUB** | umbra_950 background with faint grid, icon and wordmark at top center, menu in Inter 18 lumen_100, selected entry on umbra_800 with a 3 px violet left bar | `grub/darkjuander/` (`theme.txt`, `background.png`, select and slider images). Fonts: build with `grub2-mkfont`, see `grub/README.md` |
-| **Plymouth** | Centered icon, wordmark below, 240x4 violet progress bar on umbra_800 track, LUKS prompt in a rounded umbra_900 field with umbra_500 border | `plymouth/darkjuander/` |
-| **Login (GDM or greeter)** | Wallpaper with blur, Inter, violet focus ring, greeting "Welcome back." | wallpapers, palette |
+| **GRUB** | Artwork only. bootupd's static config does not load a theme, so the image does not install one. | `grub/darkjuander/`. See `grub/README.md` |
+| **Plymouth** | Centered icon, wordmark scaled with the icon, 240x4 violet progress bar, passphrase label from Plymouth's prompt text in Inter 14 | `plymouth/darkjuander/`. The image build runs dracut and CI checks the initramfs with `lsinitrd`. Not booted |
+| **Login (GDM or greeter)** | Planned. No greeter is installed. The "Welcome back" line is not installed | wallpapers, palette |
 | **Wallpaper** | Large eclipse at right, route faint inside the disc, small wordmark at lower left | `wallpapers/darkjuander-{3840x2160,2560x1600,1920x1080}.{svg,png}` |
 | **Terminal** | Background umbra_950, text lumen_100, violet cursor, JetBrains Mono 12 to 14 | `terminal/` for Xresources, foot, kitty, Alacritty, GNOME Terminal |
 | **Dashboard UI (planned `dj-shell`; today the `/v1/dj/top` admin view)** | Inter UI, umbra_900 cards on umbra_950, status colors only for allowed/approval/denied, violet only for focus and brand, audit hashes in JetBrains Mono ash_400 | palette, type |

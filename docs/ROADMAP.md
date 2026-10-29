@@ -7,13 +7,13 @@ Follow-ups that this PR deliberately did not build. Priority names are the PRD's
 - Build `dj-base` with `scripts/build-image.sh` and `scripts/build-disk.sh` on an aarch64 Linux host and boot it in UTM. Record the console and `scripts/check-kernel-config.sh` from inside the guest.
 - Sign the image (BASE-4). cosign is the planned tool. Nothing is signed now.
 - Compile and load an SELinux domain for `umbrad` and for agents (BASE-5, SB-4). The draft in `image/selinux/` is not that domain.
-- Boot the image and look at the Plymouth theme, the GRUB theme, the wallpaper, and `/etc/issue`. The files are installed by `image/apply-branding.sh` and have not been booted. The brand guide's status motd stays planned and is not hard-coded.
+- Boot the image and look at the Plymouth theme and the wallpaper. CI builds the Containerfile and checks the initramfs with `lsinitrd`. That is not a boot. GRUB artwork is not installed, because bootupd's static config does not load a theme. The brand guide's login greeting and status motd stay planned and are not hard-coded.
 
 ## Phase 1, P0 not finished
 
 | ID | Left to do |
 |---|---|
-| BASE-1 | CI does not build the bootc image. The workflow only lints the Containerfile. |
+| BASE-1 | CI builds the Containerfile with stub binaries and checks the initramfs. It does not produce a disk or boot it. |
 | BASE-3, UP-1, UP-2 | A/B updates and rollback come from bootc and have not been tested on a disk. |
 | BASE-9 | No qcow2 or raw artifact is produced here. |
 | RT-1, RT-2 | llama-server is an adapter and a disabled unit. It is not confined beyond the unit file, and it has not been run against the fetched GGUF in CI. |

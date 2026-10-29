@@ -1,0 +1,4 @@
+# Kernel arguments for bootc. rhgb selects the graphical Plymouth plugin.
+# quiet drops the scrolling text log. No DARKJUANDER image has been booted
+# with these arguments.
+kargs = ["rhgb", "quiet"]

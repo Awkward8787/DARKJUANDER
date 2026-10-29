@@ -2,7 +2,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="branding/logo/eclipse/png/horizontal/eclipse-horizontal-dark-1024w.png">
-  <img alt="DARKJUANDER" src="branding/logo/eclipse/png/horizontal/eclipse-horizontal-light-1024w.png" width="480">
+  <img alt="DARKJUANDER" src="branding/logo/eclipse/png/horizontal/eclipse-horizontal-light-1024w.png" width="480" height="106">
 </picture>
 
 **Agents inside a boundary you can audit.**
@@ -62,11 +62,11 @@ as a security boundary.
 
 `dj sandbox plan` prints a bubblewrap command that drops the network and capabilities. `dj sandbox run` refuses to start if `bwrap` is missing. When `bwrap` is present, the child applies Landlock and a seccomp denylist before `exec`.
 
-The image definition is [image/Containerfile](image/Containerfile). It targets Fedora bootc 45 for aarch64 and x86_64. It also installs the Umbra Eclipse Plymouth theme, GRUB theme, wallpaper, icon, and terminal colors. That branding has not been built into an image or booted. See [docs/BASE.md](docs/BASE.md).
+The image definition is [image/Containerfile](image/Containerfile). It targets Fedora bootc 45 for aarch64 and x86_64. CI builds that image with stub `umbrad`, `dj`, and `dj-auditd` binaries and checks that the Plymouth theme is in the initramfs. The GRUB artwork in `branding/grub/` is not installed. Nothing has been booted. See [docs/BASE.md](docs/BASE.md).
 
 ## What is planned
 
-The honest list is [docs/ROADMAP.md](docs/ROADMAP.md). In short: the disk image has not been built or booted, images are not signed, the audit log is not encrypted, cache hits do not skip inference, there is no desktop and no trusted approval dialog, and there is no real cloud provider client. The boot splash, GRUB theme, and wallpaper are in the image definition only. The Section 7.9 numbers are targets, not measurements. An in-process check that routing returns in under 5 ms is not the guest p95 target.
+The honest list is [docs/ROADMAP.md](docs/ROADMAP.md). In short: no disk image has been booted, images are not signed, the audit log is not encrypted, cache hits do not skip inference, there is no desktop and no trusted approval dialog, and there is no real cloud provider client. CI builds the bootc image and checks the initramfs. That is not a boot. The Section 7.9 numbers are targets, not measurements. An in-process check that routing returns in under 5 ms is not the guest p95 target.
 
 ## Build and test the userspace
 
@@ -178,11 +178,13 @@ tests/injection        the exfil page the mock treats as an instruction
 
 ## License
 
-Apache-2.0 for the code in this repository. Other licenses are listed in
-[docs/LICENSES.md](docs/LICENSES.md). Brand assets under `branding/` are
-proprietary to Anthony Jaamal Jones and Vibe Virtue Enterprise LLC, separate
-from the code. See [branding/LICENSE-BRAND.md](branding/LICENSE-BRAND.md).
+Apache-2.0 for the code in this repository, including `branding/scripts/`
+and the terminal color configs. Other licenses are listed in
+[docs/LICENSES.md](docs/LICENSES.md). Logos, marks, wallpapers, boot artwork,
+and social cards are proprietary to Anthony Jaamal Jones and Vibe Virtue
+Enterprise LLC. See [branding/LICENSE-BRAND.md](branding/LICENSE-BRAND.md).
 DARKJUANDER is not a registered trademark. The fonts in `branding/src/fonts/`
 stay under the SIL Open Font License 1.1. A first-pass name check is in
 [branding/research/name-check.md](branding/research/name-check.md). It is not
-a trademark clearance. Brand permission requests go to the GitHub repository.
+a trademark clearance. Brand permission requests use the
+[brand permission issue template](.github/ISSUE_TEMPLATE/brand-permission.yml).

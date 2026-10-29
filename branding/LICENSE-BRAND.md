@@ -4,11 +4,15 @@ Copyright (c) 2026 Anthony Jaamal Jones and Vibe Virtue Enterprise LLC. All righ
 
 ## What this covers
 
-This license covers the DARKJUANDER name, the logos and marks, the wordmarks, the icons, the wallpapers, the boot and login artwork, the social cards, and the other brand files in this `branding/` folder ("Brand Assets").
+This license covers the DARKJUANDER name, the logos and marks, the wordmarks, the icons, the wallpapers, the Plymouth and GRUB artwork, and the social cards in this `branding/` folder ("Brand Assets").
 
-It does **not** cover the DARKJUANDER source code. The code is licensed under the Apache License 2.0 (see `LICENSE` at the repository root). The Apache License does not grant rights to the project's names or marks (Apache-2.0, Section 6), and nothing in this file changes the code license.
+It does **not** cover:
 
-It does **not** cover the fonts in `src/fonts/`. Space Grotesk, Inter, and JetBrains Mono stay under the SIL Open Font License 1.1, and their license files ship with them.
+- The DARKJUANDER source code, which is Apache-2.0 (see `LICENSE` at the repository root). The Apache License does not grant rights to the project's names or marks (Apache-2.0, Section 6).
+- `branding/scripts/`, including `build.py` and `contrast.py`. Those are Apache-2.0.
+- `branding/src/palette.json`. That is Apache-2.0.
+- `branding/terminal/`. Those color configs are Apache-2.0.
+- The fonts in `src/fonts/`. Space Grotesk, Inter, and JetBrains Mono stay under the SIL Open Font License 1.1, and their license files ship with them.
 
 ## Ownership
 
@@ -34,6 +38,6 @@ The Brand Assets are proprietary to Anthony Jaamal Jones and Vibe Virtue Enterpr
 - Follow `brand-guide.md` for clear space, minimum size, and colors.
 - Do not imply DARKJUANDER holds any security certification. It holds none.
 
-Ask for permission at the contact listed in the repository README.
+Ask for permission by opening a GitHub issue with the brand permission template: `.github/ISSUE_TEMPLATE/brand-permission.yml`.
 
 These terms may be updated by the owner. They do not limit uses allowed by law, such as fair use or nominative fair use.

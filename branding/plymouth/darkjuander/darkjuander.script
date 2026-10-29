@@ -18,8 +18,14 @@ logo = Sprite(logo_img);
 logo.SetPosition(cx - ls / 2, cy - ls / 2 - sh * 0.06, 10);
 
 word_img = Image("wordmark.png");
+ww = word_img.GetWidth();
+wh = word_img.GetHeight();
+tw = Math.Int(ls * 1.8);
+th = Math.Int(wh * tw / ww);
+if (th < 1) th = 1;
+word_img = word_img.Scale(tw, th);
 word = Sprite(word_img);
-word.SetPosition(cx - word_img.GetWidth() / 2, cy + ls / 2 - sh * 0.06 + 28, 10);
+word.SetPosition(cx - tw / 2, cy + ls / 2 - sh * 0.06 + Math.Int(sh * 0.02), 10);
 
 # Progress bar
 box_img = Image("progress_box.png");
@@ -50,7 +56,7 @@ fun display_password_callback(prompt_text, bullets) {
     ey = cy + sh * 0.16;
     entry = Sprite(entry_img); entry.SetPosition(ex, ey, 20);
     lock = Sprite(lock_img); lock.SetPosition(ex - lock_img.GetWidth() - 12, ey + 2, 20);
-    label_img = Image.Text("Disk passphrase", 0.541, 0.576, 0.651, 1, "Inter 12");
+    label_img = Image.Text(prompt_text, 0.541, 0.576, 0.651, 1, "Inter 14");
     label = Sprite(label_img); label.SetPosition(ex, ey - label_img.GetHeight() - 8, 20);
     global.prompt = [entry, lock, label];
     for (i = 0; i < 32; i++) { if (global.dots[i]) global.dots[i].SetOpacity(0); }
@@ -72,7 +78,7 @@ Plymouth.SetDisplayNormalFunction(display_normal_callback);
 # Status messages (e.g. "Starting DARKJUANDER") in ash_400
 msg = Sprite(); msg.SetPosition(cx, by + 24, 10);
 fun message_callback(text) {
-    img = Image.Text(text, 0.541, 0.576, 0.651, 1, "Inter 11");
+    img = Image.Text(text, 0.541, 0.576, 0.651, 1, "Inter 14");
     msg.SetImage(img);
     msg.SetX(cx - img.GetWidth() / 2);
 }

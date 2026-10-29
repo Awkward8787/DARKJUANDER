@@ -6,3 +6,4 @@ ModuleName=script
 [script]
 ImageDir=/usr/share/plymouth/themes/darkjuander
 ScriptFile=/usr/share/plymouth/themes/darkjuander/darkjuander.script
+Font=Inter
