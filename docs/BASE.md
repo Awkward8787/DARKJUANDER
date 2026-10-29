@@ -10,13 +10,23 @@ What the image definition configures:
 - sysctl: hide kernel pointers, restrict dmesg, disable unprivileged BPF, restrict ptrace, disable kexec.
 - sshd disabled when the unit exists. The rpm-ostree count-me timer is masked when it exists.
 - `dj-llama.service` installed and not enabled.
+- Umbra Eclipse branding, via `image/apply-branding.sh`. The build fails if a listed asset is missing or empty. CI runs `podman build` on this Containerfile with stub `umbrad`, `dj`, and `dj-auditd` binaries, then `image/check-initramfs.sh` requires the theme script path, `Theme=darkjuander` inside the initramfs, and `Plymouth.ttf` pointing at Inter. That job does not boot the image, and the stubs are not the release binaries.
+  - Plymouth theme `darkjuander` at `/usr/share/plymouth/themes/darkjuander`, set as the default. The Containerfile runs `dracut` and replaces `/usr/lib/modules/*/initramfs.img`. `image/check-initramfs.sh` requires `usr/share/plymouth/themes/darkjuander/darkjuander.script` in the listing, `Theme=darkjuander` from `lsinitrd -f etc/plymouth/plymouthd.conf`, and `Plymouth.ttf` pointing at Inter. It fails if the initramfs is over 140 MiB. `plymouth-plugin-script` and `plymouth-plugin-label` (`label-freetype.so`) are installed. label-freetype ignores the family in `Image.Text` and draws with `Plymouth.ttf`. `50-darkjuander-inter.conf` is installed ahead of Noto so that file is Inter, and the build checks `fc-match` before dracut. `UseSimpledrm=1` is appended to `/usr/share/plymouth/plymouthd.defaults` because the plymouth dracut module reads that file when hostonly is off. That keeps the initramfs near the base size instead of pulling in nvidia firmware. simpledrm is in the Fedora kernel. A UEFI framebuffer (UTM) is the expected splash path. This has not been booted. `/usr/lib/bootc/kargs.d/10-darkjuander.toml` sets `rhgb` and `quiet`.
+  - GRUB artwork in `branding/grub/` is not installed. bootupd's static config does not read a theme, `/etc/default/grub`, or `/usr/share/grub/themes`.
+  - Wallpapers at `/usr/share/backgrounds/darkjuander/`, generated during the image build. `default.png` points at the 3840x2160 file. `/usr/share/gnome-background-properties/darkjuander.xml` names the same file. No desktop or greeter is installed, so nothing displays the wallpaper or the terminal color schemes yet. Those files are still installed.
+  - hicolor icon `darkjuander` under `/usr/share/icons/hicolor/`, plus `/usr/share/pixmaps/darkjuander.png`. `LOGO=darkjuander` uses that name. `fedora-logos` is swapped for `generic-logos`, which is Fedora's published way for a derivative to drop Fedora's marks. A lawyer has not reviewed that guidance.
+  - Terminal color schemes under `/usr/share/darkjuander/terminal/`. No terminal in the image is configured to load them.
+  - OFL fonts and their license files under `/usr/share/fonts/darkjuander/`, including an Inter Regular instance for Plymouth.
+  - `/usr/lib/os-release`: `NAME="DARKJUANDER"`, `PRETTY_NAME="DARKJUANDER"`, `LOGO=darkjuander`, `HOME_URL`, `SUPPORT_URL`, and `BUG_REPORT_URL` set to `https://github.com/Awkward8787/DARKJUANDER`, `ANSI_COLOR` set to violet `#9D8CFF`, `DEFAULT_HOSTNAME=darkjuander`. `ID` stays `fedora`. `ID_LIKE` is not added. `VERSION_ID` and `VARIANT_ID` stay as the base set them. `CPE_NAME`, `DOCUMENTATION_URL`, and the `REDHAT_*` fields stay Fedora's.
+  - `/usr/lib/issue` is left as the package shipped it. It already prints `\S`, which is `PRETTY_NAME`, so the image does not add a second DARKJUANDER line in `issue.d`. The brand-guide line "Welcome back. Your agents are where you left them." is planned and is not installed. The status motd is planned and is not installed.
 
 What it does not do:
 
 - It does not sign the image.
 - It does not enroll Secure Boot or seal a LUKS key to a TPM.
 - It does not load `image/selinux/darkjuander.te`.
-- CI has not run `podman build` or `bootc-image-builder`.
+- CI builds the Containerfile and checks the initramfs. It does not run `bootc-image-builder`, and it does not boot the result.
+- The Plymouth theme and the wallpaper have not been seen on a boot. The GRUB artwork is not installed. The pre-login text is the package `/usr/lib/issue`, which prints `PRETTY_NAME` once.
 
 ## Fedora 45 kernel options
 

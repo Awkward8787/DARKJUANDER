@@ -1,0 +1,17 @@
+GNOME Terminal palette (paste into Preferences > Profile > Colors, 16 entries, color0..color15):
+color0  #11141B
+color1  #FF5C5C
+color2  #3DD68C
+color3  #F5B841
+color4  #4CB8FF
+color5  #9D8CFF
+color6  #3ED6D0
+color7  #C3C9D6
+color8  #7A8398
+color9  #FF8585
+color10 #6FE6AA
+color11 #FFD27A
+color12 #82CEFF
+color13 #BDB2FF
+color14 #7FE8E3
+color15 #F4F5F8

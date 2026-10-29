@@ -1,0 +1,48 @@
+# DARKJUANDER GRUB theme (skeleton). Colors from src/palette.json.
+title-text: ""
+desktop-image: "background.png"
+desktop-image-scale-method: "stretch"
+desktop-color: "#0A0C11"
+terminal-font: "JetBrains Mono Regular 16"
+
++ boot_menu {
+    left = 30%
+    top = 46%
+    width = 40%
+    height = 36%
+    item_font = "Inter Regular 18"
+    item_color = "#8A93A6"
+    selected_item_font = "Inter Regular 18"
+    selected_item_color = "#E6E9F0"
+    selected_item_pixmap_style = "select_*.png"
+    item_height = 44
+    item_padding = 16
+    item_spacing = 6
+    icon_width = 0
+    icon_height = 0
+    scrollbar = true
+    scrollbar_width = 6
+    scrollbar_frame = "slider_*.png"
+    scrollbar_thumb = "thumb_*.png"
+}
+
++ label {
+    left = 0
+    top = 92%
+    width = 100%
+    align = "center"
+    id = "__timeout__"
+    text = "Booting the selected entry in %d s"
+    font = "Inter Regular 18"
+    color = "#8A93A6"
+}
+
++ label {
+    left = 0
+    top = 95%
+    width = 100%
+    align = "center"
+    text = "Enter to boot   e to edit   c for command line"
+    font = "Inter Regular 18"
+    color = "#5A6377"
+}

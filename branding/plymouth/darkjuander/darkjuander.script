@@ -1,0 +1,85 @@
+# DARKJUANDER Plymouth theme (script module). Skeleton: test with
+#   sudo plymouthd --debug --tty=/dev/tty2 && sudo plymouth show-splash
+# Colors come from src/palette.json: umbra_950 #0A0C11, violet #9D8CFF.
+
+Window.SetBackgroundTopColor(0.039, 0.047, 0.067);
+Window.SetBackgroundBottomColor(0.039, 0.047, 0.067);
+
+sw = Window.GetWidth();
+sh = Window.GetHeight();
+cx = Window.GetX() + sw / 2;
+cy = Window.GetY() + sh / 2;
+
+# Logo (256x256 png) scaled to about 14% of screen height
+logo_img = Image("logo.png");
+ls = Math.Int(sh * 0.14);
+logo_img = logo_img.Scale(ls, ls);
+logo = Sprite(logo_img);
+logo.SetPosition(cx - ls / 2, cy - ls / 2 - sh * 0.06, 10);
+
+word_img = Image("wordmark.png");
+ww = word_img.GetWidth();
+wh = word_img.GetHeight();
+tw = Math.Int(ls * 1.8);
+th = Math.Int(wh * tw / ww);
+if (th < 1) th = 1;
+word_img = word_img.Scale(tw, th);
+word = Sprite(word_img);
+word.SetPosition(cx - tw / 2, cy + ls / 2 - sh * 0.06 + Math.Int(sh * 0.02), 10);
+
+# Progress bar
+box_img = Image("progress_box.png");
+bar_src = Image("progress_bar.png");
+box = Sprite(box_img);
+bx = cx - box_img.GetWidth() / 2;
+by = cy + sh * 0.20;
+box.SetPosition(bx, by, 10);
+bar = Sprite();
+bar.SetPosition(bx, by, 11);
+
+fun progress_callback(duration, progress) {
+    w = Math.Int(bar_src.GetWidth() * progress);
+    if (w < 1) w = 1;
+    bar.SetImage(bar_src.Scale(w, bar_src.GetHeight()));
+}
+Plymouth.SetBootProgressFunction(progress_callback);
+
+# Disk passphrase prompt (LUKS)
+entry_img = Image("entry.png");
+bullet_img = Image("bullet.png");
+lock_img = Image("lock.png");
+prompt = NULL;
+
+fun display_password_callback(prompt_text, bullets) {
+    box.SetOpacity(0); bar.SetOpacity(0);
+    ex = cx - entry_img.GetWidth() / 2;
+    ey = cy + sh * 0.16;
+    entry = Sprite(entry_img); entry.SetPosition(ex, ey, 20);
+    lock = Sprite(lock_img); lock.SetPosition(ex - lock_img.GetWidth() - 12, ey + 2, 20);
+    label_img = Image.Text(prompt_text, 0.541, 0.576, 0.651, 1, "Inter 14");
+    label = Sprite(label_img); label.SetPosition(ex, ey - label_img.GetHeight() - 8, 20);
+    global.prompt = [entry, lock, label];
+    for (i = 0; i < 32; i++) { if (global.dots[i]) global.dots[i].SetOpacity(0); }
+    for (i = 0; i < bullets && i < 32; i++) {
+        global.dots[i] = Sprite(bullet_img);
+        global.dots[i].SetPosition(ex + 16 + i * 18, ey + entry_img.GetHeight() / 2 - 6, 21);
+        global.dots[i].SetOpacity(1);
+    }
+}
+Plymouth.SetDisplayPasswordFunction(display_password_callback);
+
+fun display_normal_callback() {
+    if (global.prompt) { for (i = 0; i < 3; i++) global.prompt[i].SetOpacity(0); }
+    for (i = 0; i < 32; i++) { if (global.dots[i]) global.dots[i].SetOpacity(0); }
+    box.SetOpacity(1); bar.SetOpacity(1);
+}
+Plymouth.SetDisplayNormalFunction(display_normal_callback);
+
+# Status messages (e.g. "Starting DARKJUANDER") in ash_400
+msg = Sprite(); msg.SetPosition(cx, by + 24, 10);
+fun message_callback(text) {
+    img = Image.Text(text, 0.541, 0.576, 0.651, 1, "Inter 14");
+    msg.SetImage(img);
+    msg.SetX(cx - img.GetWidth() / 2);
+}
+Plymouth.SetMessageFunction(message_callback);

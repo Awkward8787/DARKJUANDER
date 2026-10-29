@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512.0 512.0" width="512" height="512"><title>DARKJUANDER</title>
+
+<g transform="translate(0.00,0.00) scale(1.00000)"><circle cx="98" cy="116" r="30" fill="none" stroke="#000000" stroke-width="16"/>
+<path d="M128,116 H268 L338,186 V298 L268,368 H158 V182" fill="none" stroke="#000000" stroke-width="44" stroke-linejoin="miter" stroke-linecap="butt"/>
+<path d="M408,116 V330 L346,392 H262" fill="none" stroke="#000000" stroke-width="44" stroke-linejoin="miter" stroke-linecap="butt"/>
+<circle cx="236" cy="392" r="38" fill="#000000"/></g>
+</svg>

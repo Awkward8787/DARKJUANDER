@@ -5,3 +5,10 @@ target
 **/*.raw
 **/*.iso
 out/disk
+branding/src/fonts/.instances
+branding/grub/darkjuander/*.pf2
+branding/logo/logo-directions.svg
+branding/logo/logo-directions.png
+branding/logo/palette-swatches.svg
+branding/logo/palette-swatches.png
+**/__pycache__

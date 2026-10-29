@@ -1,5 +1,12 @@
 # DARKJUANDER
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="branding/logo/eclipse/png/horizontal/eclipse-horizontal-dark-1024w.png">
+  <img alt="DARKJUANDER" src="branding/logo/eclipse/png/horizontal/eclipse-horizontal-light-1024w.png" width="480" height="106">
+</picture>
+
+**Agents inside a boundary you can audit.**
+
 DARKJUANDER is a Linux system for running AI agents with a boundary around
 them. The working name belongs to Anthony Jaamal Jones (Jaamal), Vibe Virtue
 Enterprise LLC. It is not a new kernel. It is Fedora bootc plus a userspace
@@ -59,11 +66,11 @@ as a security boundary.
 
 `dj sandbox plan` prints a bubblewrap command that drops the network and capabilities. `dj sandbox run` refuses to start if `bwrap` is missing. When `bwrap` is present, the child applies Landlock and a seccomp denylist before `exec`.
 
-The image definition is [image/Containerfile](image/Containerfile). It targets Fedora bootc 45 for aarch64 and x86_64.
+The image definition is [image/Containerfile](image/Containerfile). It targets Fedora bootc 45 for aarch64 and x86_64. CI builds that image with stub `umbrad`, `dj`, and `dj-auditd` binaries. `image/check-initramfs.sh` then requires `usr/share/plymouth/themes/darkjuander/darkjuander.script` in the initramfs listing, `Theme=darkjuander` in the initramfs copy of `etc/plymouth/plymouthd.conf`, and `Plymouth.ttf` pointing at Inter. A name match on `darkjuander` is not that check. The GRUB artwork in `branding/grub/` is not installed. Nothing has been booted. See [docs/BASE.md](docs/BASE.md).
 
 ## What is planned
 
-The honest list is [docs/ROADMAP.md](docs/ROADMAP.md). In short: the disk image has not been built or booted, images are not signed, the audit log is not encrypted, cache hits do not skip inference, there is no desktop and no trusted approval dialog. Cloud routing is implemented and off by default; see [docs/providers.md](docs/providers.md). The image unit still denies non-localhost egress until an operator installs the drop-in there. The Section 7.9 numbers are targets, not measurements. An in-process check that routing returns in under 5 ms is not the guest p95 target.
+The honest list is [docs/ROADMAP.md](docs/ROADMAP.md). In short: the disk image has not been built or booted, images are not signed, the audit log is not encrypted, cache hits do not skip inference, there is no desktop and no trusted approval dialog. Cloud routing is implemented and off by default; see [docs/providers.md](docs/providers.md). The image unit still denies non-localhost egress until an operator installs the drop-in there. CI builds the bootc image and checks the initramfs. That is not a boot. The Section 7.9 numbers are targets, not measurements. An in-process check that routing returns in under 5 ms is not the guest p95 target.
 
 ## Build and test the userspace
 
@@ -155,6 +162,7 @@ The filename under `out/disk/` is whatever bootc-image-builder writes. This comm
 
 ```
 image/                 Containerfile, systemd units, nftables, sysctl, draft SELinux
+branding/              Umbra Eclipse brand kit. Not Apache-2.0. See branding/LICENSE-BRAND.md
 services/label         integrity and confidentiality labels
 services/audit         hash-chained log
 services/policy        YAML rules
@@ -174,5 +182,13 @@ tests/injection        the exfil page the mock treats as an instruction
 
 ## License
 
-Apache-2.0 for the code in this repository. Other licenses are listed in
-[docs/LICENSES.md](docs/LICENSES.md). DARKJUANDER and UMBRA have not had a trademark search.
+Apache-2.0 for the code in this repository, including `branding/scripts/`
+and the terminal color configs. Other licenses are listed in
+[docs/LICENSES.md](docs/LICENSES.md). Logos, marks, wallpapers, boot artwork,
+and social cards are proprietary to Anthony Jaamal Jones and Vibe Virtue
+Enterprise LLC. See [branding/LICENSE-BRAND.md](branding/LICENSE-BRAND.md).
+DARKJUANDER is not a registered trademark. The fonts in `branding/src/fonts/`
+stay under the SIL Open Font License 1.1. A first-pass name check is in
+[branding/research/name-check.md](branding/research/name-check.md). It is not
+a trademark clearance. Brand permission requests use the
+[brand permission issue template](.github/ISSUE_TEMPLATE/brand-permission.yml).
