@@ -32,7 +32,10 @@ accel=tcg
 case "${arch}" in
   aarch64|arm64)
     qemu="qemu-system-aarch64"
-    machine=( -machine virt -cpu cortex-a57 )
+    # cortex-a57 under TCG is slow enough that Fedora never reaches
+    # multi-user inside the job timeout. max is the faster TCG model.
+    # KVM still uses -cpu host below.
+    machine=( -machine virt -cpu max )
     firmware=/usr/share/AAVMF/AAVMF_CODE.fd
     if [[ ! -f "${firmware}" ]]; then
       firmware=/usr/share/qemu-efi-aarch64/QEMU_EFI.fd
@@ -100,13 +103,17 @@ sep = sys.argv.index("--", 8)
 machine = sys.argv[8:sep]
 netdev = sys.argv[sep + 1 :]
 
+# aarch64 GitHub runners have no /dev/kvm, so this boot is TCG. Four cores
+# and 4G match those hosts and get Fedora to multi-user sooner than 2x2G.
+mem = "4096" if "aarch64" in qemu else "2048"
+smp = "4" if "aarch64" in qemu else "2"
 cmd = [
     qemu,
     *machine,
     "-m",
-    "2048",
+    mem,
     "-smp",
-    "2",
+    smp,
     "-drive",
     f"if=pflash,format=raw,readonly=on,file={firmware}",
     "-drive",

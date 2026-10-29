@@ -48,7 +48,7 @@ jobs:
   image:
     name: image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 180
+    timeout-minutes: 210
     strategy:
       fail-fast: false
       matrix:
@@ -58,11 +58,14 @@ jobs:
             platform: linux/arm64
             qemu_pkg: qemu-system-arm
             firmware_pkg: qemu-efi-aarch64
+            # No KVM on the ARM runner. TCG needs a longer boot than x86.
+            smoke_timeout: "7200"
           - arch: x86_64
             runner: ubuntu-24.04
             platform: linux/amd64
             qemu_pkg: qemu-system-x86
             firmware_pkg: ovmf
+            smoke_timeout: "2400"
     steps:
       - uses: actions/checkout@v4
 
@@ -159,7 +162,7 @@ jobs:
         id: smoke
         if: steps.qcow2.outcome == 'success'
         env:
-          SMOKE_TIMEOUT_SECS: "2400"
+          SMOKE_TIMEOUT_SECS: ${{ matrix.smoke_timeout }}
         run: ./scripts/smoke-qemu.sh dist/smoke.qcow2
 
       - name: upload smoke log

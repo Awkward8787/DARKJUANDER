@@ -36,6 +36,13 @@ fi
 cfg=$(mktemp)
 work=$(mktemp -d)
 trap 'rm -rf "${cfg}" "${work}"' EXIT
+# aarch64 virt (QEMU and UTM) exposes the serial port as ttyAMA0. ttyS0 is
+# the x86 serial device. Without ttyAMA0, the aarch64 console never shows
+# the login prompt the smoke test types into.
+case "$(uname -m)" in
+  aarch64|arm64) console="console=tty0 console=ttyAMA0,115200" ;;
+  *) console="console=tty0 console=ttyS0,115200" ;;
+esac
 cat > "${cfg}" << EOF
 [[customizations.user]]
 name = "dj"
@@ -43,7 +50,7 @@ password = "${password}"
 groups = ["wheel"]
 
 [customizations.kernel]
-append = "console=tty0 console=ttyS0,115200"
+append = "${console}"
 EOF
 
 source_tag=${tag}
