@@ -411,26 +411,40 @@ fn build_record(seq: u64, prev_hash: &str, event: Event) -> Record {
 }
 
 const CHECKPOINT_ATTEMPTS: u32 = 4;
-const CHECKPOINT_RETRY_PAUSE: Duration = Duration::from_millis(20);
 
 /// Retry a checkpoint a few times when the signer is briefly busy or the
 /// socket closes mid-write. A refusal or a bad signature is not retried.
+/// Waits grow from 20 ms and stop at 80 ms.
 fn retry_transient_checkpoint(
-    mut op: impl FnMut() -> Result<(), AuditError>,
+    op: impl FnMut() -> Result<(), AuditError>,
 ) -> Result<(), AuditError> {
-    let mut attempt = 0;
+    retry_transient_checkpoint_with(op, std::thread::sleep)
+}
+
+fn retry_transient_checkpoint_with(
+    mut op: impl FnMut() -> Result<(), AuditError>,
+    mut pause: impl FnMut(Duration),
+) -> Result<(), AuditError> {
+    let mut attempt = 0u32;
     loop {
         match op() {
             Ok(()) => return Ok(()),
             Err(err)
                 if is_transient_checkpoint_error(&err) && attempt + 1 < CHECKPOINT_ATTEMPTS =>
             {
+                let delay = checkpoint_backoff(attempt);
                 attempt += 1;
-                std::thread::sleep(CHECKPOINT_RETRY_PAUSE);
+                pause(delay);
             }
             Err(err) => return Err(err),
         }
     }
+}
+
+fn checkpoint_backoff(retry_index: u32) -> Duration {
+    let shift = retry_index.min(3);
+    let millis = 20u64.saturating_mul(1u64 << shift).min(80);
+    Duration::from_millis(millis)
 }
 
 fn is_transient_checkpoint_error(err: &AuditError) -> bool {
@@ -1102,38 +1116,64 @@ mod tests {
     #[test]
     fn checkpoint_retries_a_busy_signer_and_not_a_refusal() {
         let mut calls = 0;
-        retry_transient_checkpoint(|| {
-            calls += 1;
-            if calls < 3 {
-                Err(AuditError::Corrupt("signer is busy".into()))
-            } else {
-                Ok(())
-            }
-        })
+        let mut pauses = Vec::new();
+        retry_transient_checkpoint_with(
+            || {
+                calls += 1;
+                if calls < 3 {
+                    Err(AuditError::Corrupt("signer is busy".into()))
+                } else {
+                    Ok(())
+                }
+            },
+            |delay| pauses.push(delay),
+        )
         .unwrap();
         assert_eq!(calls, 3);
+        assert_eq!(
+            pauses,
+            vec![Duration::from_millis(20), Duration::from_millis(40),]
+        );
 
         calls = 0;
-        let err = retry_transient_checkpoint(|| {
-            calls += 1;
-            Err(AuditError::Corrupt(
-                "refusing record seq 2; signer is at 5".into(),
-            ))
-        })
+        pauses.clear();
+        let err = retry_transient_checkpoint_with(
+            || {
+                calls += 1;
+                Err(AuditError::Corrupt(
+                    "refusing record seq 2; signer is at 5".into(),
+                ))
+            },
+            |delay| pauses.push(delay),
+        )
         .unwrap_err();
         assert_eq!(calls, 1);
+        assert!(pauses.is_empty(), "a refusal must not be retried");
         assert!(err.to_string().contains("refusing"), "{err}");
 
         calls = 0;
-        let err = retry_transient_checkpoint(|| {
-            calls += 1;
-            Err(AuditError::Io(std::io::Error::from_raw_os_error(
-                libc::ECONNRESET,
-            )))
-        })
+        pauses.clear();
+        let err = retry_transient_checkpoint_with(
+            || {
+                calls += 1;
+                Err(AuditError::Io(std::io::Error::from_raw_os_error(
+                    libc::ECONNRESET,
+                )))
+            },
+            |delay| pauses.push(delay),
+        )
         .unwrap_err();
         assert_eq!(calls, CHECKPOINT_ATTEMPTS);
+        assert_eq!(
+            pauses,
+            vec![
+                Duration::from_millis(20),
+                Duration::from_millis(40),
+                Duration::from_millis(80),
+            ]
+        );
         assert!(is_transient_checkpoint_error(&err));
+        assert_eq!(checkpoint_backoff(3), Duration::from_millis(80));
     }
 
     fn transient_signer_error(err: &AuditError) -> bool {
