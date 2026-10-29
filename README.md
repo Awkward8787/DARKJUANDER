@@ -59,7 +59,7 @@ The image definition is [image/Containerfile](image/Containerfile). It targets F
 
 ## What is planned
 
-The honest list is [docs/ROADMAP.md](docs/ROADMAP.md). In short: the disk image has not been built or booted, images are not signed, the audit log is not encrypted, cache hits do not skip inference, there is no desktop and no trusted approval dialog, and there is no real cloud provider client. The Section 7.9 numbers are targets, not measurements. An in-process check that routing returns in under 5 ms is not the guest p95 target.
+The honest list is [docs/ROADMAP.md](docs/ROADMAP.md). In short: the disk image has not been built or booted, images are not signed, the audit log is not encrypted, cache hits do not skip inference, there is no desktop and no trusted approval dialog. Cloud routing is implemented and off by default; see [docs/providers.md](docs/providers.md). The image unit still denies non-localhost egress until an operator installs the drop-in there. The Section 7.9 numbers are targets, not measurements. An in-process check that routing returns in under 5 ms is not the guest p95 target.
 
 ## Build and test the userspace
 

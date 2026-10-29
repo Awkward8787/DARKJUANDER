@@ -2,7 +2,8 @@
 //!
 //! The daemon listens on a Unix socket. The HTTP surface is a small
 //! OpenAI-compatible subset plus DARKJUANDER tool and admin routes.
-//! Anthropic messages, streaming, and cloud provider clients are planned.
+//! Anthropic messages and client streaming are planned. Cloud providers use
+//! the OpenAI-compatible adapter in `umbra`; see docs/providers.md.
 
 #![forbid(unsafe_code)]
 

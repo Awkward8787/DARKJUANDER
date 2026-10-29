@@ -19,7 +19,7 @@ Follow-ups that this PR deliberately did not build. Priority names are the PRD's
 | RT-4 | The router does not refuse a load based on a live RAM estimate. |
 | GW-1 | Chat completions and the models list exist. Streaming and tool-call streaming do not. |
 | GW-2 | No Anthropic messages endpoint. |
-| GW-6 | No keyring. There is no cloud client, so there is no stored provider key. |
+| GW-6 | API keys are owner-only files or systemd `LoadCredential` entries. There is no kernel keyring. Cloud routing stays off until a provider is granted. See docs/providers.md. |
 | SB-2 | The child seccomp profile is still a denylist (`dj_sandbox::DENIED_SYSCALLS`). An allowlist is future work; a short allowlist would break ordinary agent programs, so this slice does not pretend to have one. CI does not execute the filter. |
 | PE-6, PE-7 | No content inspection. Session floors stop the broker-read laundering path. They do not stop a copied byte string that arrives through another channel. |
 | SB-5 | cgroup limits are attempted and reported. They are not applied unless the host cgroup tree accepts the write. |
@@ -35,7 +35,7 @@ Follow-ups that this PR deliberately did not build. Priority names are the PRD's
 
 ## Phase 1 exit, still open
 
-- Cloud providers. The router can drop a cloud candidate. There is no OpenAI, Anthropic, or other client.
+- Anthropic is not a client. xAI and OpenAI share one OpenAI-compatible adapter; see docs/providers.md. The image unit still blocks egress.
 - Jaamal's real agents are not onboarded.
 - No outside review of the sandbox and broker.
 

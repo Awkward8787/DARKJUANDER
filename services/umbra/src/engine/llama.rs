@@ -118,6 +118,7 @@ mod tests {
                 role: "user".into(),
                 content: "hi".into(),
             }],
+            confidentiality: None,
         });
         assert_eq!(body["messages"][0]["content"], "hi");
         assert!(body["messages"][0].get("dj_labels").is_none());
