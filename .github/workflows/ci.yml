@@ -41,6 +41,7 @@ jobs:
           ./scripts/test-smoke-marker.sh
           ./scripts/test-release-version.sh
           ./scripts/test-write-disk-config.sh
+          ./scripts/test-cosign-ghcr-auth-check.sh
       - name: containerfile and kernel-config script
         run: |
           ./scripts/check-containerfile.sh

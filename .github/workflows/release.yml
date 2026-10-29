@@ -29,6 +29,7 @@ on:
       - "scripts/smoke_marker.py"
       - "scripts/write-disk-config.py"
       - "scripts/render-release-notes.sh"
+      - "scripts/cosign-ghcr-auth-check.sh"
       - "image/Containerfile"
       - "image/console-password.txt"
       - "image/systemd/dj-expire-password.service"
@@ -405,8 +406,10 @@ jobs:
             "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-aarch64"
           sudo podman manifest add "localhost/darkjuander:${VERSION}" \
             "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-x86_64"
-          sudo podman manifest push --all "localhost/darkjuander:${VERSION}" \
+          sudo podman manifest push --all --digestfile dist/index.digest \
+            "localhost/darkjuander:${VERSION}" \
             "docker://ghcr.io/awkward8787/darkjuander:${VERSION}"
+          grep -Eq '^sha256:[0-9a-f]{64}$' dist/index.digest
           sudo podman manifest create "localhost/darkjuander-latest"
           sudo podman manifest add "localhost/darkjuander-latest" \
             "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-aarch64"
@@ -414,18 +417,71 @@ jobs:
             "docker://ghcr.io/awkward8787/darkjuander:${VERSION}-x86_64"
           sudo podman manifest push --all "localhost/darkjuander-latest" \
             "docker://ghcr.io/awkward8787/darkjuander:latest"
-          cosign sign --yes "ghcr.io/awkward8787/darkjuander:${VERSION}"
-          cosign sign --yes "ghcr.io/awkward8787/darkjuander:latest"
+
+      # sudo podman login stores credentials in root's containers auth file.
+      # cosign runs as the runner user and reads the docker config instead.
+      # Log in with cosign, then sign the index digest rather than the tag.
+      - name: sign image by digest
+        id: sign
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          printf '%s\n' "${GH_TOKEN}" | cosign login ghcr.io --username "${GH_ACTOR}" --password-stdin
+          digest=$(tr -d '\r\n' < dist/index.digest)
+          identity="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}"
+          cosign sign --yes "ghcr.io/awkward8787/darkjuander@${digest}"
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "${identity}" \
+            "ghcr.io/awkward8787/darkjuander@${digest}"
+          printf 'digest=%s\n' "${digest}" >> "${GITHUB_OUTPUT}"
 
       - name: github release
+        id: release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           body_path: dist/out/RELEASE_NOTES.md
           files: dist/out/*
 
       - name: package visibility
+        env:
+          DIGEST: ${{ steps.sign.outputs.digest }}
         run: |
           {
+            echo "Signed ghcr.io/awkward8787/darkjuander@${DIGEST}."
             echo "GHCR packages are often private on first push."
             echo "bootc switch needs a public package. Confirm visibility at https://ghcr.io/awkward8787/darkjuander"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: publish did not finish
+        if: always() && (steps.sign.outcome != 'success' || steps.release.outcome != 'success')
+        run: |
+          echo "Publish did not finish. A GHCR push may exist without a verified signature. This job is a failure." >&2
+          exit 1
+
+  # Pull requests cannot publish. This job still logs cosign into GHCR and
+  # asks for a digest that does not exist, so a bad docker config fails here
+  # instead of on the next tag.
+  cosign-auth:
+    name: cosign auth
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v2.5.3
+
+      - name: cosign login without publishing
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/cosign-ghcr-auth-check.sh
