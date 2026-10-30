@@ -8,7 +8,7 @@ reused, what we wrote, and what we are not claiming.
 
 | Piece | What we use it for | Why we did not rewrite it |
 |---|---|---|
-| Fedora bootc 45 (`quay.io/fedora/fedora-bootc:45`) | `dj-base` image | Read-only root and A/B updates already exist. The tag is published for aarch64 and x86_64. |
+| Fedora bootc 45, mirrored at `ghcr.io/awkward8787/fedora-bootc` by the digest in `image/fedora-bootc.digest` | `dj-base` image | Read-only root and A/B updates already exist. The index includes aarch64 and x86_64. The build uses that digest, not the Quay tag. |
 | systemd | `umbrad`, slices, sysusers, tmpfiles | Service lifecycle and resource accounting are already there. |
 | nftables | Default-deny inbound | A short ruleset, not a new firewall. |
 | Fedora SELinux | Enforcing mode from the base image | A custom domain is a draft in `image/selinux/` and is not loaded. |

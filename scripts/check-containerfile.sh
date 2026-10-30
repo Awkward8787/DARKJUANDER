@@ -9,7 +9,17 @@ if [[ ! -f "${file}" ]]; then
   exit 1
 fi
 
-grep -q 'quay.io/fedora/fedora-bootc:45@sha256:0688bb4fec1318fc2fce52497dd45f84f807f5ea9af1919569801dd05fd6241b' "${file}"
+digest=$(tr -d '[:space:]' < "${root}/image/fedora-bootc.digest")
+if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  echo "fedora-bootc pin must be sha256 and 64 hex digits" >&2
+  exit 1
+fi
+grep -q "ghcr.io/awkward8787/fedora-bootc@${digest}" "${file}"
+grep -q "${digest}" "${root}/docs/BASE.md"
+if grep -q 'quay.io/fedora/fedora-bootc' "${file}"; then
+  echo "Containerfile must build from the GHCR mirror, not Quay" >&2
+  exit 1
+fi
 grep -q 'umbrad.service' "${file}"
 grep -q 'nftables.service' "${file}"
 grep -q 'plymouth-plugin-script' "${file}"

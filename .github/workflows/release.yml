@@ -36,7 +36,9 @@ on:
       - "scripts/cosign-ghcr-auth-check.sh"
       - "scripts/assert-cosign-docker-config.sh"
       - "scripts/cosign-ci-probe.sh"
+      - "scripts/mirror-fedora-bootc.sh"
       - "image/Containerfile"
+      - "image/fedora-bootc.digest"
       - "image/console-password.txt"
       - "image/systemd/dj-expire-password.service"
 
@@ -54,12 +56,45 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
+  # Copies image/fedora-bootc.digest into ghcr.io/awkward8787/fedora-bootc.
+  # It does not push ghcr.io/awkward8787/darkjuander. A later run skips the
+  # copy once that digest is already in the mirror.
+  mirror-base:
+    name: mirror base
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+
+      - name: login
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s\n' "${GH_TOKEN}" | sudo skopeo login ghcr.io --username "${GH_ACTOR}" --password-stdin
+
+      - name: copy the pinned digest
+        run: sudo ./scripts/mirror-fedora-bootc.sh
+
+      - name: logout ghcr
+        if: always()
+        run: sudo skopeo logout ghcr.io || true
+
   image:
     name: image (${{ matrix.arch }})
+    needs: mirror-base
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
       contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -126,13 +161,20 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           PLATFORM: ${{ matrix.platform }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          printf '%s\n' "${GH_TOKEN}" | sudo podman login ghcr.io -u "${GH_ACTOR}" --password-stdin
           sudo podman build \
             --platform "${PLATFORM}" \
             --build-arg "DJ_VERSION=${VERSION}" \
             -f image/Containerfile \
             -t "localhost/dj-base:${VERSION}" \
             .
+
+      - name: logout ghcr
+        if: always()
+        run: sudo podman logout ghcr.io || true
 
       - name: qcow2
         id: qcow2
