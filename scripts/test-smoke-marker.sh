@@ -13,6 +13,7 @@ from smoke_marker import (
     password_expired,
     probe_command,
     socket_ok,
+    sudo_took_new_password,
 )
 
 cmd = probe_command("darkjuander")
@@ -21,12 +22,18 @@ if socket_ok(echoed) or multi_user_ok(echoed):
     raise SystemExit("echoed probe must not count as a live boot")
 if "UMBRAD_SOCKET_OK" in cmd or "MULTI_USER_OK" in cmd:
     raise SystemExit("probe command must not contain a marker")
+if "is-system-running --wait" not in cmd:
+    raise SystemExit("probe must wait until the system is running")
 if not socket_ok(echoed + "\nUMBRAD_SOCKET_OK\n"):
     raise SystemExit("a real socket marker line must pass")
 if not multi_user_ok(echoed + "\nMULTI_USER_OK\n"):
     raise SystemExit("a real multi-user marker line must pass")
 if not multi_user_ok("Reached target multi-user.target - Multi-User System."):
     raise SystemExit("the console banner must still count")
+if multi_user_ok("Reached target multi-user.target\ndegraded\n"):
+    raise SystemExit("a degraded boot must fail when the banner is visible")
+if multi_user_ok("degraded\n" + "MULTI_USER_OK\n"):
+    raise SystemExit("a degraded boot must fail on a quiet console too")
 
 # Missing socket: command echo, failed test, prompt, no marker line.
 missing = echoed + "\n[sudo] password for dj: \n[dj@fedora ~]$ "
@@ -64,7 +71,7 @@ def drive(chunks, old="darkjuander", new="Dj-Console-9k"):
             and new.encode() in typed
         ):
             sent_new = True
-    accepted = sent_new and socket_ok(buf)
+    accepted = sudo_took_new_password(sent_new, socket_ok(buf))
     return expiry_proven(buf, guest.sent_retype, accepted)
 
 
@@ -95,5 +102,10 @@ changed = [
 ]
 if not drive(changed):
     raise SystemExit("a finished change that sudo accepts must pass")
+src = open(sys.argv[1] + "/scripts/smoke-qemu.sh", encoding="utf-8").read()
+if "sent_new_to_sudo and" in src or "password_expired(" in src:
+    raise SystemExit("smoke-qemu must not inline the expiry check")
+if "expiry_proven(" not in src or "sudo_took_new_password(" not in src:
+    raise SystemExit("smoke-qemu must call the tested helpers")
 print("smoke-marker: ok")
 PY

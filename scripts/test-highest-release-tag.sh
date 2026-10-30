@@ -20,11 +20,32 @@ check() {
   fi
 }
 
+# 0 moves :latest, 1 leaves it, 2 is not a rankable tag.
+expect_rc() {
+  local name=$1 version=$2 want=$3
+  shift 3
+  local rc=0
+  printf '%s\n' "$@" | python3 "${script}" "${version}" >/dev/null 2>&1 || rc=$?
+  if [[ "${rc}" -ne "${want}" ]]; then
+    echo "${name}: exit ${rc}, want ${want}" >&2
+    exit 1
+  fi
+}
+
 check only v0.1.0 yes "refs/tags/v0.1.0"
 check newer v0.2.0 yes "refs/tags/v0.1.0" "refs/tags/v0.2.0"
 check older v0.1.0 no "aaa refs/tags/v0.1.0" "bbb refs/tags/v0.2.0"
 check prerelease v1.0.0 yes "refs/tags/v1.0.0-rc.1" "refs/tags/v1.0.0"
 check not_prerelease v1.0.0-rc.1 no "refs/tags/v1.0.0-rc.1" "refs/tags/v1.0.0"
+check pre_only v1.0.0-rc.1 no "refs/tags/v1.0.0-rc.1"
+expect_rc pre_exit v1.0.0-rc.1 1 "refs/tags/v1.0.0-rc.1"
+expect_rc stable_exit v0.1.0 0 "refs/tags/v0.1.0"
+expect_rc older_exit v0.1.0 1 "refs/tags/v0.2.0"
+expect_rc garbage_exit not-a-tag 2
+check higher_pre_ignored v1.0.0 yes "refs/tags/v9.0.0-rc.1" "refs/tags/v1.0.0"
+check ten v1.10.0 yes "refs/tags/v1.9.0"
+check nine v1.9.0 no "refs/tags/v1.10.0"
+expect_rc leading_zero v1.02.0 2 "refs/tags/v1.2.0"
 check peel v0.2.0 yes "refs/tags/v0.2.0" "refs/tags/v0.2.0^{}" "refs/tags/v0.1.0"
 check ignore v0.1.0 yes "refs/tags/not-a-version" "refs/tags/v0.1.0"
 

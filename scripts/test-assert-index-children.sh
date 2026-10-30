@@ -40,4 +40,23 @@ if python3 "${script}" "${tmp}/one.json" "${tmp}/aarch64.digest" "${tmp}/x86_64.
   exit 1
 fi
 
+printf '{not json\n' > "${tmp}/bad.json"
+rc=0
+err=$(python3 "${script}" "${tmp}/bad.json" "${tmp}/aarch64.digest" "${tmp}/x86_64.digest" 2>&1) || rc=$?
+if [[ "${rc}" -eq 0 || "${err}" == *"Traceback"* || "${err}" != *"not JSON"* ]]; then
+  echo "bad JSON should fail without a traceback" >&2
+  exit 1
+fi
+
+cat > "${tmp}/windows.json" << EOF
+{"manifests":[
+  {"digest":"${arm}","platform":{"architecture":"arm64","os":"windows"}},
+  {"digest":"${amd}","platform":{"architecture":"amd64","os":"linux"}}
+]}
+EOF
+if python3 "${script}" "${tmp}/windows.json" "${tmp}/aarch64.digest" "${tmp}/x86_64.digest" >/dev/null 2>&1; then
+  echo "a non-linux child should fail" >&2
+  exit 1
+fi
+
 echo "assert-index-children: ok"

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-file=${root}/image/Containerfile
+file=${CONTAINERFILE:-${root}/image/Containerfile}
 if [[ ! -f "${file}" ]]; then
   echo "missing ${file}" >&2
   exit 1
@@ -43,6 +43,10 @@ if grep -E '^[[:space:]]*FROM[[:space:]]' "${file}" | grep -q 'quay.io/fedora/fe
   exit 1
 fi
 grep -q 'umbrad.service' "${file}"
+if ! grep -Eq '^[[:space:]]*&& systemctl enable .*dj-expire-password\.service' "${file}"; then
+  echo "Containerfile must enable dj-expire-password.service" >&2
+  exit 1
+fi
 grep -q 'nftables.service' "${file}"
 grep -q 'plymouth-plugin-script' "${file}"
 grep -q 'plymouth-plugin-label' "${file}"

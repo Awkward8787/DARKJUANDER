@@ -104,7 +104,7 @@ jobs:
 
   image-branding:
     needs: mirror-publish
-    if: always() && needs.mirror-publish.result != 'failure' && needs.mirror-publish.result != 'cancelled'
+    if: ${{ !cancelled() && needs.mirror-publish.result != 'failure' && needs.mirror-publish.result != 'cancelled' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read

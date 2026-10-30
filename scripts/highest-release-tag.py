@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Exit 0 when the given tag is the highest v* semver on stdin.
+"""Exit 0 when VERSION is the highest stable v* tag on stdin.
 
 Stdin is either `git ls-remote --tags` output or one tag per line.
-A release is higher than the same numbers with a prerelease. Tags that
-are not vMAJOR.MINOR.PATCH with an optional prerelease are ignored.
+A tag with a "-" suffix is a pre-release and is ignored. A component
+with a leading zero is not a stable tag, so v1.02.0 does not rank as v1.2.0.
 """
 
 from __future__ import annotations
@@ -11,26 +11,23 @@ from __future__ import annotations
 import re
 import sys
 
-TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.]+))?$")
+# Stable tags only. A "-" suffix is a pre-release and does not move :latest.
+# A leading zero is not a stable component, so v1.02.0 is not v1.2.0.
+STABLE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+PRERELEASE = re.compile(r"^v\d+\.\d+\.\d+-")
 
 
 def version_key(tag: str) -> tuple | None:
-    match = TAG.fullmatch(tag)
+    match = STABLE.fullmatch(tag)
     if match is None:
         return None
-    major, minor, patch = (int(match.group(i)) for i in range(1, 4))
-    pre = match.group(4)
-    if pre is None:
-        pre_key: tuple = (1,)
-    else:
-        parts: list[tuple] = []
-        for ident in pre.split("."):
-            if ident.isdigit():
-                parts.append((0, int(ident)))
-            else:
-                parts.append((1, ident))
-        pre_key = (0, tuple(parts))
-    return (major, minor, patch, pre_key)
+    parts: list[int] = []
+    for group in match.groups():
+        # v1.02.0 must not rank as v1.2.0.
+        if len(group) > 1 and group.startswith("0"):
+            return None
+        parts.append(int(group))
+    return tuple(parts)
 
 
 def tag_name(line: str) -> str | None:
@@ -50,6 +47,9 @@ def main() -> int:
     version = sys.argv[1]
     want = version_key(version)
     if want is None:
+        if PRERELEASE.match(version):
+            sys.stderr.write(f"{version} is a pre-release; not moving :latest\n")
+            return 1
         sys.stderr.write(f"not a version tag: {version}\n")
         return 2
     best = want

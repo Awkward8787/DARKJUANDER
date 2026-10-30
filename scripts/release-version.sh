@@ -9,7 +9,8 @@ event=${GITHUB_EVENT_NAME:?}
 dry=${DRY_RUN:-}
 out=${GITHUB_OUTPUT:?}
 
-tag_re='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+# No leading zeros, so v1.02.0 is not a version and cannot tie with v1.2.0.
+tag_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.]+)?$'
 dry_re='^0\.0\.0-dry\.[0-9a-f]{12}$'
 
 publish=false

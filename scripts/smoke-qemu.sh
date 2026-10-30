@@ -93,6 +93,7 @@ set +e
 export SMOKE_LIB="${root}/scripts"
 # First-login password chosen only inside this VM. The shipped default is
 # expired by dj-expire-password.service, so the guest asks for a new one.
+# This password is typed on the console and is stored in the serial-log artifact.
 smoke_new_password=${SMOKE_NEW_PASSWORD:-Dj-Console-9k}
 timeout --foreground --kill-after=20 "$((timeout_secs + 45))" \
   python3 - "${qemu}" "${firmware}" "${image}" "${log}" "${result}" "${password}" "${timeout_secs}" "${smoke_new_password}" \
@@ -107,9 +108,10 @@ import time
 sys.path.insert(0, os.environ["SMOKE_LIB"])
 from smoke_marker import (
     LoginDriver,
+    expiry_proven,
     multi_user_ok,
-    password_expired,
     socket_ok as marker_ok,
+    sudo_took_new_password,
 )
 
 # systemd colors the console, so "Reached target multi-user.target" is not
@@ -213,8 +215,11 @@ finally:
         proc.wait(timeout=15)
     log.close()
 
-sudo_accepted_new = sent_new_to_sudo and socket_ok
-expired = password_expired(text) and login.sent_retype and sudo_accepted_new
+expired = expiry_proven(
+    text,
+    login.sent_retype,
+    sudo_took_new_password(sent_new_to_sudo, socket_ok),
+)
 lines = [
     f"multi-user: {'yes' if multi else 'no'}",
     f"umbrad-socket: {'yes' if socket_ok else 'no'}",

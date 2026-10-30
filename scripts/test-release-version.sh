@@ -37,6 +37,15 @@ got=$(run env GITHUB_REF=refs/heads/main GITHUB_SHA=0123456789abcdef GITHUB_EVEN
 printf '%s\n' "${got}" | grep -qx 'version=0.0.0-dry.0123456789ab'
 printf '%s\n' "${got}" | grep -qx 'publish=false'
 
+if run env GITHUB_REF=refs/tags/v1.02.0 GITHUB_SHA=aaaaaaaaaaaa GITHUB_EVENT_NAME=push DRY_RUN=; then
+  echo "a leading zero in the version must be refused" >&2
+  exit 1
+fi
+if run env GITHUB_REF=refs/tags/v01.2.3 GITHUB_SHA=aaaaaaaaaaaa GITHUB_EVENT_NAME=push DRY_RUN=; then
+  echo "a leading zero in the major version must be refused" >&2
+  exit 1
+fi
+
 # The tag is literal; command substitution must not run.
 # shellcheck disable=SC2016
 if run env GITHUB_REF='refs/tags/v1.2.3$(id)' GITHUB_SHA=aaaaaaaaaaaa GITHUB_EVENT_NAME=push DRY_RUN=; then
