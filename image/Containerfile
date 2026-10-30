@@ -1,7 +1,7 @@
 # dj-base
 # Fedora bootc 45 index mirrored by digest. The pin is image/fedora-bootc.digest,
-# the index Quay served for :45 on 2026-10-30. The build uses the GHCR mirror,
-# not the Quay tag. CI builds this image with stub binaries and checks the
+# the index Quay served for :45 on 2026-10-30. The build uses that GHCR digest,
+# not a tag. CI builds this image with stub binaries and checks the
 # initramfs. The release workflow builds it again with the real binaries.
 # A tag publish can attach a cosign signature; bootc does not enforce it
 # unless you configure that policy. This comment does not claim a boot.

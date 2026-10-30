@@ -14,9 +14,31 @@ if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
   echo "fedora-bootc pin must be sha256 and 64 hex digits" >&2
   exit 1
 fi
-grep -q "ghcr.io/awkward8787/fedora-bootc@${digest}" "${file}"
+
+# The digest has to be on the FROM instruction. A comment on that line,
+# or anywhere else in the file, is not a pin.
+from_pins_digest() {
+  local target=$1 want=$2 line instr
+  line=$(grep -E '^[[:space:]]*FROM[[:space:]]' "${target}" | head -n 1 || true)
+  if [[ -z "${line}" ]]; then
+    echo "Containerfile has no FROM line" >&2
+    return 1
+  fi
+  instr=${line%%#*}
+  if [[ "${instr}" != *"@${want}"* ]]; then
+    echo "FROM must use @${want}. A digest in a comment does not pin the image." >&2
+    return 1
+  fi
+}
+
+if [[ "${1:-}" == "--from" ]]; then
+  from_pins_digest "${2:?}" "${3:?}"
+  exit
+fi
+
+from_pins_digest "${file}" "${digest}"
 grep -q "${digest}" "${root}/docs/BASE.md"
-if grep -q 'quay.io/fedora/fedora-bootc' "${file}"; then
+if grep -E '^[[:space:]]*FROM[[:space:]]' "${file}" | grep -q 'quay.io/fedora/fedora-bootc'; then
   echo "Containerfile must build from the GHCR mirror, not Quay" >&2
   exit 1
 fi

@@ -47,6 +47,7 @@ jobs:
           ./scripts/test-highest-release-tag.sh
           ./scripts/test-assert-index-children.sh
           ./scripts/test-mirror-fedora-bootc.sh
+          ./scripts/test-check-containerfile.sh
       - name: containerfile and kernel-config script
         run: |
           ./scripts/check-containerfile.sh
@@ -71,13 +72,16 @@ jobs:
           PATH="/tmp/brand-venv/bin:${PATH}" ./scripts/check-branding.sh --no-png
           PATH="/tmp/brand-venv/bin:${PATH}" ./scripts/check-branding.sh --check-social
 
-  # Copies image/fedora-bootc.digest into ghcr.io/awkward8787/fedora-bootc.
-  # It does not push ghcr.io/awkward8787/darkjuander. A later run skips the
-  # copy once that digest is already in the mirror.
-  mirror-base:
-    name: mirror base
+  # Writes only on a push to main. Pull requests and other branches skip
+  # this job. They check the digest that is already public.
+  mirror-publish:
+    name: mirror publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    concurrency:
+      group: mirror-fedora-bootc
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -93,35 +97,29 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: printf '%s\n' "${GH_TOKEN}" | sudo skopeo login ghcr.io --username "${GH_ACTOR}" --password-stdin
       - name: copy the pinned digest
-        run: sudo ./scripts/mirror-fedora-bootc.sh
+        run: sudo ./scripts/mirror-fedora-bootc.sh --write
       - name: logout ghcr
         if: always()
         run: sudo skopeo logout ghcr.io || true
 
   image-branding:
-    needs: mirror-base
+    needs: mirror-publish
+    if: always() && needs.mirror-publish.result != 'failure' && needs.mirror-publish.result != 'cancelled'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      packages: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: podman build and initramfs check
-        env:
-          GH_ACTOR: ${{ github.actor }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman
-          printf '%s\n' "${GH_TOKEN}" | sudo podman login ghcr.io -u "${GH_ACTOR}" --password-stdin
+          sudo apt-get install -y podman skopeo
+          ./scripts/mirror-fedora-bootc.sh --check
           mkdir -p out/stage
           printf '#!/bin/sh\necho stub\n' > out/stage/umbrad
           cp out/stage/umbrad out/stage/dj
           cp out/stage/umbrad out/stage/dj-auditd
           chmod 0755 out/stage/umbrad out/stage/dj out/stage/dj-auditd
           sudo podman build --network=host -f image/Containerfile -t localhost/dj-base:branding-ci .
-      - name: logout ghcr
-        if: always()
-        run: sudo podman logout ghcr.io || true

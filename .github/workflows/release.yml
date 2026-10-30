@@ -56,13 +56,35 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
-  # Copies image/fedora-bootc.digest into ghcr.io/awkward8787/fedora-bootc.
-  # It does not push ghcr.io/awkward8787/darkjuander. A later run skips the
-  # copy once that digest is already in the mirror.
-  mirror-base:
-    name: mirror base
+  # Pull requests, branch refs, and v* tags only read the public digest.
+  # packages:write is not granted here, and the script is not run as root.
+  mirror-check:
+    name: mirror check
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+
+      - name: require the pinned digest
+        run: ./scripts/mirror-fedora-bootc.sh --check
+
+  # A manual run from main may copy the pin. Tag publishes do not.
+  mirror-publish:
+    name: mirror publish
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    concurrency:
+      group: mirror-fedora-bootc
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -81,7 +103,7 @@ jobs:
         run: printf '%s\n' "${GH_TOKEN}" | sudo skopeo login ghcr.io --username "${GH_ACTOR}" --password-stdin
 
       - name: copy the pinned digest
-        run: sudo ./scripts/mirror-fedora-bootc.sh
+        run: sudo ./scripts/mirror-fedora-bootc.sh --write
 
       - name: logout ghcr
         if: always()
@@ -89,12 +111,18 @@ jobs:
 
   image:
     name: image (${{ matrix.arch }})
-    needs: mirror-base
+    needs: [mirror-check, mirror-publish]
+    if: >-
+      always() &&
+      needs.mirror-check.result != 'failure' &&
+      needs.mirror-check.result != 'cancelled' &&
+      needs.mirror-publish.result != 'failure' &&
+      needs.mirror-publish.result != 'cancelled' &&
+      (needs.mirror-check.result == 'success' || needs.mirror-publish.result == 'success')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
       contents: read
-      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -161,20 +189,13 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           PLATFORM: ${{ matrix.platform }}
-          GH_ACTOR: ${{ github.actor }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '%s\n' "${GH_TOKEN}" | sudo podman login ghcr.io -u "${GH_ACTOR}" --password-stdin
           sudo podman build \
             --platform "${PLATFORM}" \
             --build-arg "DJ_VERSION=${VERSION}" \
             -f image/Containerfile \
             -t "localhost/dj-base:${VERSION}" \
             .
-
-      - name: logout ghcr
-        if: always()
-        run: sudo podman logout ghcr.io || true
 
       - name: qcow2
         id: qcow2
