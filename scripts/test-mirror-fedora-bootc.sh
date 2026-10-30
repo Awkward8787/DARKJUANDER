@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# The mirror script must not contact a registry. skopeo is a mock.
+# These cases fail if the script skips on a tag, or drops either post-check.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+script=${root}/scripts/mirror-fedora-bootc.sh
+digest=$(tr -d '[:space:]' < "${root}/image/fedora-bootc.digest")
+short=${digest#sha256:}
+short=${short:0:12}
+pin_tag="45-${short}"
+wrong=$(printf 'sha256:%s' "$(printf 'b%.0s' {1..64})")
+tmp=$(mktemp -d)
+trap 'rm -rf "${tmp}"' EXIT
+
+cat > "${tmp}/skopeo" << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${SKOPEO_LOG}"
+ref="${@: -1}"
+if [[ "$1" == "copy" ]]; then
+  if [[ "${COPY_MODE}" == "quay_missing" ]]; then
+    echo "manifest unknown: QUAY-STDERR-MARKER" >&2
+    exit 1
+  fi
+  touch "${SKOPEO_COPIED}"
+  exit 0
+fi
+if [[ "${ref}" == *@sha256:* ]]; then
+  if [[ -f "${SKOPEO_COPIED}" ]]; then
+    if [[ "${DIGEST_AFTER}" == "wrong" ]]; then
+      printf '%s\n' "${WRONG_DIGEST}"
+      exit 0
+    fi
+    printf '%s\n' "${EXPECT_DIGEST}"
+    exit 0
+  fi
+  if [[ "${DIGEST_BEFORE}" == "down" ]]; then
+    echo "connection refused: MIRROR-STDERR-MARKER" >&2
+    exit 1
+  fi
+  if [[ "${DIGEST_BEFORE}" == "ok" ]]; then
+    printf '%s\n' "${EXPECT_DIGEST}"
+    exit 0
+  fi
+  echo "manifest unknown: digest not in mirror" >&2
+  exit 1
+fi
+if [[ "${TAG_BEFORE}" == "ok" || -f "${SKOPEO_COPIED}" ]]; then
+  if [[ "${TAG_AFTER}" == "wrong" && -f "${SKOPEO_COPIED}" ]]; then
+    printf '%s\n' "${WRONG_DIGEST}"
+    exit 0
+  fi
+  printf '%s\n' "${EXPECT_DIGEST}"
+  exit 0
+fi
+echo "manifest unknown: tag missing" >&2
+exit 1
+EOF
+chmod 0755 "${tmp}/skopeo"
+
+run_script() {
+  DIGEST_BEFORE=${DIGEST_BEFORE:-missing} \
+  DIGEST_AFTER=${DIGEST_AFTER:-ok} \
+  TAG_BEFORE=${TAG_BEFORE:-missing} \
+  TAG_AFTER=${TAG_AFTER:-ok} \
+  COPY_MODE=${COPY_MODE:-ok} \
+  SKOPEO_LOG="${tmp}/log" \
+  SKOPEO_COPIED="${tmp}/copied" \
+  EXPECT_DIGEST="${digest}" \
+  WRONG_DIGEST="${wrong}" \
+  PATH="${tmp}:${PATH}" \
+  "$@"
+}
+
+reset() {
+  rm -f "${tmp}/log" "${tmp}/copied"
+  DIGEST_BEFORE=missing
+  DIGEST_AFTER=ok
+  TAG_BEFORE=missing
+  TAG_AFTER=ok
+  COPY_MODE=ok
+}
+
+reset
+DIGEST_BEFORE=ok
+TAG_BEFORE=ok
+run_script "${script}" --write >/dev/null
+if grep -q '^copy ' "${tmp}/log"; then
+  echo "a mirror that already has the digest and the pin tag must not be copied" >&2
+  exit 1
+fi
+if ! grep -q "@${digest}" "${tmp}/log"; then
+  echo "the skip must inspect the digest, not only a tag" >&2
+  exit 1
+fi
+
+# A tag that already resolves must not hide a missing digest.
+reset
+TAG_BEFORE=ok
+run_script "${script}" --write >/dev/null
+if ! grep -q "^copy --all --preserve-digests docker://quay.io/fedora/fedora-bootc@${digest} " "${tmp}/log"; then
+  echo "a present tag must not skip the copy when the digest is missing" >&2
+  exit 1
+fi
+if ! grep -q "docker://ghcr.io/awkward8787/fedora-bootc:${pin_tag}" "${tmp}/log"; then
+  echo "the copy must use the immutable pin tag ${pin_tag}" >&2
+  exit 1
+fi
+if grep -q 'darkjuander' "${tmp}/log"; then
+  echo "mirror copy must not name the release image" >&2
+  exit 1
+fi
+
+# Dropping the tag post-check would accept this.
+reset
+TAG_AFTER=wrong
+rc=0
+run_script "${script}" --write >/dev/null 2>&1 || rc=$?
+if [[ "${rc}" -eq 0 ]]; then
+  echo "a tag that does not match the pin must fail" >&2
+  exit 1
+fi
+
+# Dropping the digest post-check would accept this.
+reset
+DIGEST_AFTER=wrong
+rc=0
+run_script "${script}" --write >/dev/null 2>&1 || rc=$?
+if [[ "${rc}" -eq 0 ]]; then
+  echo "a digest inspect that does not match the pin must fail" >&2
+  exit 1
+fi
+
+reset
+COPY_MODE=quay_missing
+rc=0
+err=$(run_script "${script}" --write 2>&1) || rc=$?
+if [[ "${rc}" -eq 0 || "${err}" != *"not on Quay"* || "${err}" != *"QUAY-STDERR-MARKER"* ]]; then
+  echo "a Quay miss must say not on Quay and show skopeo stderr" >&2
+  exit 1
+fi
+if [[ "${err}" == *"mirror unreachable or tampered"* ]]; then
+  echo "a Quay miss must not be reported as a mirror failure" >&2
+  exit 1
+fi
+
+reset
+DIGEST_BEFORE=down
+rc=0
+err=$(run_script "${script}" --check 2>&1) || rc=$?
+if [[ "${rc}" -eq 0 || "${err}" != *"mirror unreachable or tampered"* || "${err}" != *"MIRROR-STDERR-MARKER"* ]]; then
+  echo "an unreachable mirror must show skopeo stderr" >&2
+  exit 1
+fi
+if [[ "${err}" == *"not on Quay"* ]]; then
+  echo "an unreachable mirror must not be reported as not on Quay" >&2
+  exit 1
+fi
+if [[ -f "${tmp}/log" ]] && grep -q '^copy ' "${tmp}/log"; then
+  echo "a failed mirror inspect must not copy" >&2
+  exit 1
+fi
+
+reset
+rc=0
+run_script "${script}" --check >/dev/null 2>&1 || rc=$?
+if [[ "${rc}" -eq 0 ]]; then
+  echo "a check of a missing digest must fail closed" >&2
+  exit 1
+fi
+if [[ -f "${tmp}/log" ]] && grep -q '^copy ' "${tmp}/log"; then
+  echo "check mode must not copy" >&2
+  exit 1
+fi
+
+reset
+rc=0
+err=$(FEDORA_BOOTC_MIRROR=localhost:5000/org/fedora-bootc run_script "${script}" --write 2>&1) || rc=$?
+if [[ "${rc}" -ne 0 ]]; then
+  echo "a registry with a port should copy: ${err}" >&2
+  exit 1
+fi
+if ! grep -q "docker://localhost:5000/org/fedora-bootc:${pin_tag}" "${tmp}/log"; then
+  echo "a port in the registry host was stripped" >&2
+  exit 1
+fi
+if grep -q 'docker://localhost/org/' "${tmp}/log"; then
+  echo "the port was dropped from the registry host" >&2
+  exit 1
+fi
+
+reset
+rc=0
+FEDORA_BOOTC_MIRROR=ghcr.io/awkward8787/darkjuander \
+  run_script "${script}" --write >/dev/null 2>&1 || rc=$?
+if [[ "${rc}" -eq 0 ]]; then
+  echo "the release image name must fail" >&2
+  exit 1
+fi
+if [[ -f "${tmp}/log" ]] && grep -q . "${tmp}/log"; then
+  echo "the release image guard must run before skopeo" >&2
+  exit 1
+fi
+
+if grep -Eq 'skopeo delete|untag' "${script}"; then
+  echo "the mirror script must not untag an existing pin" >&2
+  exit 1
+fi
+
+echo "mirror-fedora-bootc: ok"

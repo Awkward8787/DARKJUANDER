@@ -46,6 +46,8 @@ jobs:
           ./scripts/test-cosign-ci-probe.sh
           ./scripts/test-highest-release-tag.sh
           ./scripts/test-assert-index-children.sh
+          ./scripts/test-mirror-fedora-bootc.sh
+          ./scripts/test-check-containerfile.sh
       - name: containerfile and kernel-config script
         run: |
           ./scripts/check-containerfile.sh
@@ -70,8 +72,42 @@ jobs:
           PATH="/tmp/brand-venv/bin:${PATH}" ./scripts/check-branding.sh --no-png
           PATH="/tmp/brand-venv/bin:${PATH}" ./scripts/check-branding.sh --check-social
 
-  image-branding:
+  # Writes only on a push to main. Pull requests and other branches skip
+  # this job. They check the digest that is already public.
+  mirror-publish:
+    name: mirror publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    concurrency:
+      group: mirror-fedora-bootc
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+      - name: login
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s\n' "${GH_TOKEN}" | sudo skopeo login ghcr.io --username "${GH_ACTOR}" --password-stdin
+      - name: copy the pinned digest
+        run: sudo ./scripts/mirror-fedora-bootc.sh --write
+      - name: logout ghcr
+        if: always()
+        run: sudo skopeo logout ghcr.io || true
+
+  image-branding:
+    needs: mirror-publish
+    if: always() && needs.mirror-publish.result != 'failure' && needs.mirror-publish.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -79,7 +115,8 @@ jobs:
       - name: podman build and initramfs check
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman
+          sudo apt-get install -y podman skopeo
+          ./scripts/mirror-fedora-bootc.sh --check
           mkdir -p out/stage
           printf '#!/bin/sh\necho stub\n' > out/stage/umbrad
           cp out/stage/umbrad out/stage/dj

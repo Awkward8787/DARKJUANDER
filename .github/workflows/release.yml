@@ -36,7 +36,9 @@ on:
       - "scripts/cosign-ghcr-auth-check.sh"
       - "scripts/assert-cosign-docker-config.sh"
       - "scripts/cosign-ci-probe.sh"
+      - "scripts/mirror-fedora-bootc.sh"
       - "image/Containerfile"
+      - "image/fedora-bootc.digest"
       - "image/console-password.txt"
       - "image/systemd/dj-expire-password.service"
 
@@ -54,8 +56,69 @@ defaults:
     shell: bash -euo pipefail {0}
 
 jobs:
+  # Pull requests, branch refs, and v* tags only read the public digest.
+  # packages:write is not granted here, and the script is not run as root.
+  mirror-check:
+    name: mirror check
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+
+      - name: require the pinned digest
+        run: ./scripts/mirror-fedora-bootc.sh --check
+
+  # A manual run from main may copy the pin. Tag publishes do not.
+  mirror-publish:
+    name: mirror publish
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    concurrency:
+      group: mirror-fedora-bootc
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: install skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+
+      - name: login
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s\n' "${GH_TOKEN}" | sudo skopeo login ghcr.io --username "${GH_ACTOR}" --password-stdin
+
+      - name: copy the pinned digest
+        run: sudo ./scripts/mirror-fedora-bootc.sh --write
+
+      - name: logout ghcr
+        if: always()
+        run: sudo skopeo logout ghcr.io || true
+
   image:
     name: image (${{ matrix.arch }})
+    needs: [mirror-check, mirror-publish]
+    if: >-
+      always() &&
+      needs.mirror-check.result != 'failure' &&
+      needs.mirror-check.result != 'cancelled' &&
+      needs.mirror-publish.result != 'failure' &&
+      needs.mirror-publish.result != 'cancelled' &&
+      (needs.mirror-check.result == 'success' || needs.mirror-publish.result == 'success')
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
@@ -228,6 +291,9 @@ jobs:
   iso:
     name: iso (${{ matrix.arch }})
     needs: image
+    # mirror-publish is skipped on a pull request. Without this, GitHub also
+    # skips jobs further down the chain even after image succeeded.
+    if: always() && needs.image.result == 'success'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     permissions:

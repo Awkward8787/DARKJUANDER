@@ -1,6 +1,6 @@
 # dj-base
 
-`image/Containerfile` starts from `quay.io/fedora/fedora-bootc:45` pinned by the index digest resolved on 2026-10-29 (`sha256:0688bb4fec1318fc2fce52497dd45f84f807f5ea9af1919569801dd05fd6241b`). That tag is a manifest list. On that date Quay also had `45-aarch64` and `45-x86_64`. Build on the target architecture. The Containerfile copies the `umbrad` and `dj` binaries you staged, so a macOS `cargo build` must not be copied into the image. The image is not signed.
+`image/Containerfile` builds from `ghcr.io/awkward8787/fedora-bootc@sha256:479ad7d16893891ea21c774536b11e26cd5b87fa59636a902700cbe438cee634`. That is the Fedora bootc 45 index Quay served for `quay.io/fedora/fedora-bootc:45` on 2026-10-30, and it is the only pin, in `image/fedora-bootc.digest`. A push to `main`, or a workflow dispatch from `main`, may copy that index with `skopeo copy --all --preserve-digests` to the tag `45-` plus the first 12 hex digits of the digest. That tag is not moved onto a different digest, and the script does not delete other tags. Pull requests, other branches, and `v*` tag builds only check that the digest is already in the mirror. The Containerfile uses the digest. This package is not `ghcr.io/awkward8787/darkjuander`. The index includes aarch64 and x86_64. Build on the target architecture. The Containerfile copies the `umbrad` and `dj` binaries you staged, so a macOS `cargo build` must not be copied into the image. The image is not signed.
 
 What the image definition configures:
 
