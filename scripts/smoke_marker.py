@@ -17,7 +17,7 @@ def probe_command(sudo_password: str) -> str:
     line is not itself a success line.
     """
     return (
-        "systemctl is-active multi-user.target | grep -qx active"
+        "systemctl is-system-running --wait | grep -qx running"
         " && printf '%s%s\\n' 'MULTI_' 'USER_OK'; "
         "echo "
         + sudo_password

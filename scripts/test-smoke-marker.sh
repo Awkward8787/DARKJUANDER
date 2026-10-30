@@ -21,6 +21,8 @@ if socket_ok(echoed) or multi_user_ok(echoed):
     raise SystemExit("echoed probe must not count as a live boot")
 if "UMBRAD_SOCKET_OK" in cmd or "MULTI_USER_OK" in cmd:
     raise SystemExit("probe command must not contain a marker")
+if "is-system-running --wait" not in cmd:
+    raise SystemExit("probe must wait until the system is running")
 if not socket_ok(echoed + "\nUMBRAD_SOCKET_OK\n"):
     raise SystemExit("a real socket marker line must pass")
 if not multi_user_ok(echoed + "\nMULTI_USER_OK\n"):

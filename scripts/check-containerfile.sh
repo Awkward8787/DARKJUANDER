@@ -43,6 +43,10 @@ if grep -E '^[[:space:]]*FROM[[:space:]]' "${file}" | grep -q 'quay.io/fedora/fe
   exit 1
 fi
 grep -q 'umbrad.service' "${file}"
+if ! grep -Eq '^[[:space:]]*&& systemctl enable .*dj-expire-password\.service' "${file}"; then
+  echo "Containerfile must enable dj-expire-password.service" >&2
+  exit 1
+fi
 grep -q 'nftables.service' "${file}"
 grep -q 'plymouth-plugin-script' "${file}"
 grep -q 'plymouth-plugin-label' "${file}"

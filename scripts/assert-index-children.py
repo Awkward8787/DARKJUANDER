@@ -30,7 +30,14 @@ def main() -> int:
     if len(sys.argv) != 4:
         sys.stderr.write("usage: assert-index-children.py INDEX AARCH64 X86_64\n")
         return 2
-    index = json.load(open(sys.argv[1], encoding="utf-8"))
+    try:
+        index = json.load(open(sys.argv[1], encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(f"index is not JSON: {exc}\n")
+        return 1
+    if not isinstance(index, dict):
+        sys.stderr.write("index is not a JSON object\n")
+        return 1
     want = {
         "aarch64": digest_file(sys.argv[2]),
         "x86_64": digest_file(sys.argv[3]),
@@ -47,6 +54,10 @@ def main() -> int:
         platform = item.get("platform")
         if not isinstance(platform, dict):
             sys.stderr.write("index manifest has no platform\n")
+            return 1
+        os_name = platform.get("os")
+        if os_name != "linux":
+            sys.stderr.write(f"index child os is {os_name}, not linux\n")
             return 1
         arch = ARCH.get(str(platform.get("architecture")))
         digest = item.get("digest")

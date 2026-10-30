@@ -21,7 +21,13 @@ case "${1:-}" in
     ;;
 esac
 
-digest=$(tr -d '[:space:]' < "${root}/image/fedora-bootc.digest")
+# A dispatch from main may pass FEDORA_BOOTC_DIGEST. Empty uses the file.
+# Anything else must be sha256 and 64 hex digits, or this refuses to copy.
+if [[ -n "${FEDORA_BOOTC_DIGEST:-}" ]]; then
+  digest=$(printf '%s' "${FEDORA_BOOTC_DIGEST}" | tr -d '[:space:]')
+else
+  digest=$(tr -d '[:space:]' < "${root}/image/fedora-bootc.digest")
+fi
 if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
   echo "fedora-bootc pin must be sha256 and 64 hex digits" >&2
   exit 1
