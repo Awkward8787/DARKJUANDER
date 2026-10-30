@@ -26,6 +26,27 @@ if [[ "$1" == "copy" ]]; then
   touch "${SKOPEO_COPIED}"
   exit 0
 fi
+if [[ "$1" == "inspect" && "$*" == *"--raw"* ]]; then
+  case "${RAW_MODE:-ok}" in
+    single)
+      echo '{"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","platform":{"architecture":"amd64","os":"linux"}}]}'
+      ;;
+    manifest)
+      echo '{"mediaType":"application/vnd.oci.image.manifest.v1+json"}'
+      ;;
+    docker)
+      echo '{"mediaType":"application/vnd.docker.distribution.manifest.list.v2+json","manifests":[{"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","platform":{"architecture":"amd64","os":"linux"}},{"digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","platform":{"architecture":"arm64","os":"linux"}}]}'
+      ;;
+    *)
+      echo '{"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","platform":{"architecture":"amd64","os":"linux"}},{"digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","platform":{"architecture":"arm64","os":"linux"}}]}'
+      ;;
+  esac
+  exit 0
+fi
+if [[ "$1" == "inspect" && "$*" != *"--format"* ]]; then
+  printf '{"Labels":{"org.opencontainers.image.version":"%s"}}\n' "${LABEL_VERSION:-45.1}"
+  exit 0
+fi
 if [[ "${ref}" == *@sha256:* ]]; then
   if [[ -f "${SKOPEO_COPIED}" ]]; then
     if [[ "${DIGEST_AFTER}" == "wrong" ]]; then
@@ -292,6 +313,57 @@ if [[ "${rc}" -eq 0 ]]; then
 fi
 if [[ -f "${tmp}/log" ]] && grep -q . "${tmp}/log"; then
   echo "a bad digest override must fail before skopeo" >&2
+  exit 1
+fi
+
+# Loosening sha256:[0-9a-f]{64} would let these reach skopeo.
+for bad in "sha256:$(printf 'a%.0s' {1..63})" "sha256:$(printf 'A%.0s' {1..64})" "sha256:$(printf 'g%.0s' {1..64})"; do
+  reset
+  rc=0
+  FEDORA_BOOTC_DIGEST="${bad}" run_script "${script}" --write >/dev/null 2>&1 || rc=$?
+  if [[ "${rc}" -eq 0 ]]; then
+    echo "digest ${bad} must fail" >&2
+    exit 1
+  fi
+  if [[ -f "${tmp}/log" ]] && grep -q . "${tmp}/log"; then
+    echo "digest ${bad} must fail before skopeo" >&2
+    exit 1
+  fi
+done
+
+reject_index() {
+  local mode=$1 label=$2
+  reset
+  rc=0
+  RAW_MODE="${mode}" LABEL_VERSION="${label}" FEDORA_BOOTC_DIGEST="${alt}" \
+    DIGEST_BEFORE=missing DIGEST_AFTER=ok TAG_BEFORE=missing TAG_AFTER=ok COPY_MODE=ok \
+    SKOPEO_LOG="${tmp}/log" SKOPEO_COPIED="${tmp}/copied" \
+    EXPECT_DIGEST="${alt}" WRONG_DIGEST="${wrong}" \
+    PATH="${tmp}:${PATH}" \
+    "${script}" --write >/dev/null 2>&1 || rc=$?
+  if [[ "${rc}" -eq 0 ]]; then
+    echo "dispatch index ${mode}/${label} must fail" >&2
+    exit 1
+  fi
+  if [[ -f "${tmp}/log" ]] && grep -q '^copy ' "${tmp}/log"; then
+    echo "dispatch index ${mode}/${label} must not be copied" >&2
+    exit 1
+  fi
+}
+reject_index single 45.1
+reject_index manifest 45.1
+reject_index ok 44
+
+reset
+rc=0
+err=$(RAW_MODE=docker LABEL_VERSION=45 FEDORA_BOOTC_DIGEST="${alt}" \
+  DIGEST_BEFORE=missing DIGEST_AFTER=ok TAG_BEFORE=missing TAG_AFTER=ok COPY_MODE=ok \
+  SKOPEO_LOG="${tmp}/log" SKOPEO_COPIED="${tmp}/copied" \
+  EXPECT_DIGEST="${alt}" WRONG_DIGEST="${wrong}" \
+  PATH="${tmp}:${PATH}" \
+  "${script}" --write 2>&1) || rc=$?
+if [[ "${rc}" -ne 0 ]]; then
+  echo "a docker manifest list for 45 should copy: ${err}" >&2
   exit 1
 fi
 

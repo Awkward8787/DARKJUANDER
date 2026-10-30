@@ -395,7 +395,7 @@ jobs:
     # it still lets a successful ISO artifact be attached. A bad tag name is
     # rejected by scripts/release-version.sh before it reaches a shell step.
     if: >-
-      always() &&
+      !cancelled() &&
       needs.image.result == 'success' &&
       (needs.iso.result == 'success' || needs.iso.result == 'failure' || needs.iso.result == 'skipped') &&
       startsWith(github.ref, 'refs/tags/v') &&

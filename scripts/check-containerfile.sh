@@ -3,7 +3,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-file=${root}/image/Containerfile
+file=${CONTAINERFILE:-${root}/image/Containerfile}
 if [[ ! -f "${file}" ]]; then
   echo "missing ${file}" >&2
   exit 1

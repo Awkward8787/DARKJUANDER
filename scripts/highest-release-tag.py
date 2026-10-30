@@ -2,8 +2,8 @@
 """Exit 0 when VERSION is the highest stable v* tag on stdin.
 
 Stdin is either `git ls-remote --tags` output or one tag per line.
-A tag with a "-" suffix is a pre-release and is ignored. Numeric
-components keep leading zeros, so v1.02.0 ranks as v1.2.0.
+A tag with a "-" suffix is a pre-release and is ignored. A component
+with a leading zero is not a stable tag, so v1.02.0 does not rank as v1.2.0.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import re
 import sys
 
 # Stable tags only. A "-" suffix is a pre-release and does not move :latest.
-# Components are integers, so v1.02.0 and v1.2.0 are the same version.
+# A leading zero is not a stable component, so v1.02.0 is not v1.2.0.
 STABLE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 PRERELEASE = re.compile(r"^v\d+\.\d+\.\d+-")
 
@@ -21,7 +21,13 @@ def version_key(tag: str) -> tuple | None:
     match = STABLE.fullmatch(tag)
     if match is None:
         return None
-    return tuple(int(match.group(i)) for i in range(1, 4))
+    parts: list[int] = []
+    for group in match.groups():
+        # v1.02.0 must not rank as v1.2.0.
+        if len(group) > 1 and group.startswith("0"):
+            return None
+        parts.append(int(group))
+    return tuple(parts)
 
 
 def tag_name(line: str) -> str | None:
@@ -41,7 +47,7 @@ def main() -> int:
     version = sys.argv[1]
     want = version_key(version)
     if want is None:
-        if PRERELEASE.fullmatch(version):
+        if PRERELEASE.match(version):
             sys.stderr.write(f"{version} is a pre-release; not moving :latest\n")
             return 1
         sys.stderr.write(f"not a version tag: {version}\n")

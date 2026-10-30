@@ -46,13 +46,30 @@ def password_expired(text: str) -> bool:
     )
 
 
+def sudo_took_new_password(sent_new_to_sudo: bool, socket_marker: bool) -> bool:
+    """True when the probe sent the new password and sudo accepted it."""
+    return bool(sent_new_to_sudo) and bool(socket_marker)
+
+
 def expiry_proven(text: str, sent_retype: bool, sudo_accepted_new: bool) -> bool:
     """True when the guest changed dj's password and sudo took the new one."""
     return password_expired(text) and sent_retype and sudo_accepted_new
 
 
+def system_degraded(text: str) -> bool:
+    """True when systemctl reported the degraded state on its own line."""
+    return any(line.strip() == "degraded" for line in text.splitlines())
+
+
 def multi_user_ok(text: str) -> bool:
-    """True for the systemd banner or a guest-built marker line."""
+    """True for a running boot, not a degraded one.
+
+    The banner and the guest marker both fail when a line is exactly
+    "degraded". A quiet console only has the marker, which the probe
+    prints after `is-system-running` says running.
+    """
+    if system_degraded(text):
+        return False
     if "Reached target multi-user.target" in text or "Multi-User System" in text:
         return True
     return any(line.strip() == MULTI_MARKER for line in text.splitlines())

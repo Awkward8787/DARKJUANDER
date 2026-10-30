@@ -111,6 +111,7 @@ from smoke_marker import (
     expiry_proven,
     multi_user_ok,
     socket_ok as marker_ok,
+    sudo_took_new_password,
 )
 
 # systemd colors the console, so "Reached target multi-user.target" is not
@@ -214,8 +215,11 @@ finally:
         proc.wait(timeout=15)
     log.close()
 
-sudo_accepted_new = sent_new_to_sudo and socket_ok
-expired = expiry_proven(text, login.sent_retype, sudo_accepted_new)
+expired = expiry_proven(
+    text,
+    login.sent_retype,
+    sudo_took_new_password(sent_new_to_sudo, socket_ok),
+)
 lines = [
     f"multi-user: {'yes' if multi else 'no'}",
     f"umbrad-socket: {'yes' if socket_ok else 'no'}",
