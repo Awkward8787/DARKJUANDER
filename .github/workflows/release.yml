@@ -291,6 +291,9 @@ jobs:
   iso:
     name: iso (${{ matrix.arch }})
     needs: image
+    # mirror-publish is skipped on a pull request. Without this, GitHub also
+    # skips jobs further down the chain even after image succeeded.
+    if: always() && needs.image.result == 'success'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     permissions:
