@@ -216,7 +216,7 @@ jobs:
 
       - name: upload qcow2
         if: steps.qcow2.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: darkjuander-${{ matrix.arch }}
           if-no-files-found: error
@@ -231,7 +231,7 @@ jobs:
 
       - name: upload smoke log
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: darkjuander-smoke-${{ matrix.arch }}
           if-no-files-found: warn
@@ -253,7 +253,7 @@ jobs:
           printf '%s\n' "${VERSION}" > dist/container/version.txt
 
       - name: upload container
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: darkjuander-container-${{ matrix.arch }}
           if-no-files-found: error
@@ -358,7 +358,7 @@ jobs:
 
       - name: upload iso
         if: steps.iso.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: darkjuander-iso-${{ matrix.arch }}
           if-no-files-found: error
